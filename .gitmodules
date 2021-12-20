@@ -1,0 +1,3 @@
+[submodule "ccan"]
+	path = ccan
+	url = https://github.com/rustyrussell/ccan.git
