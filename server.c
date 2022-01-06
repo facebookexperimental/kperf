@@ -97,7 +97,7 @@ int main(int argc, char *argv[])
 
 	err_set_progname(argv[0]);
 
-	if (opt.server && daemonize())
+	if (opt.server && !daemonize())
 		err(1, "can't daemonize");
 
 	addr = net_server_lookup(opt.service, AF_UNSPEC, SOCK_STREAM);
