@@ -31,13 +31,13 @@ extern int verbose;
 static inline void ____kpm_trace(int level, const char *fn, const char *pfx,
 				 const char *fmt, ...)
 {
-	const char *letters = "IDT ";
+	const char *letters = "!EWIDT ";
 	va_list ap;
 
 	if (verbose < level)
 		return;
-	if (level > 3)
-		level = 3;
+	if (level > 6)
+		level = 6;
 
 	fprintf(stderr, "%c%s %s: ", letters[level], pfx, fn);
 	va_start(ap, fmt);
@@ -46,13 +46,13 @@ static inline void ____kpm_trace(int level, const char *fn, const char *pfx,
 	fprintf(stderr, "\n");
 }
 
-#define __kpm_info(pfx, msg...)		____kpm_trace(0, __FILE__, pfx, msg)
+#define __kpm_info(pfx, msg...)		____kpm_trace(3, __FILE__, pfx, msg)
 #define kpm_info(msg...)		__kpm_info("  ", msg)
 
-#define __kpm_dbg(pfx, msg...)		____kpm_trace(1, __FILE__, pfx, msg)
+#define __kpm_dbg(pfx, msg...)		____kpm_trace(4, __FILE__, pfx, msg)
 #define kpm_dbg(msg...)			__kpm_dbg("  ", msg)
 
-#define __kpm_trace(pfx, msg...)	____kpm_trace(2, __FILE__, pfx, msg)
+#define __kpm_trace(pfx, msg...)	____kpm_trace(5, __FILE__, pfx, msg)
 #define kpm_trace(msg...)		__kpm_trace("  ", msg)
 
 #endif

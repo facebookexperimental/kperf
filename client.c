@@ -17,6 +17,9 @@
 
 #include "bipartite_match.h"
 #include "proto.h"
+#include "proto_dbg.h"
+
+int verbose = 3;
 
 static struct {
 	bool tls;
@@ -24,7 +27,6 @@ static struct {
 	bool tls_tx;
 	bool tls_nopad;
 	unsigned int tls_ver;
-	int verbose;
 	char *src;
 	char *dst;
 	char *src_svc;
@@ -111,8 +113,10 @@ static const struct opt_table opts[] = {
 	OPT_WITH_ARG("--num-connections|-n <arg>",
 		     opt_set_uintval, opt_show_uintval,
 		     &opt.n_conns, "Number of connections"),
-	OPT_WITHOUT_ARG("--verbose|-v", opt_inc_intval, &opt.verbose,
+	OPT_WITHOUT_ARG("--verbose|-v", opt_inc_intval, &verbose,
 			"Verbose mode (can be specified more than once)"),
+	OPT_WITHOUT_ARG("--quiet|-q", opt_dec_intval, &verbose,
+			"Quiet mode (can be specified more than once)"),
 	OPT_WITHOUT_ARG("--usage|--help|-h", opt_usage_and_exit,
 			"kpeft client",	"Show this help message"),
 	OPT_ENDTABLE
