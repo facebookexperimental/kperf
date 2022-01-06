@@ -26,6 +26,8 @@ static struct {
 	bool tls_rx;
 	bool tls_tx;
 	bool tls_nopad;
+	bool output_csv;
+	bool output_hdr;
 	unsigned int tls_ver;
 	char *src;
 	char *dst;
@@ -113,6 +115,10 @@ static const struct opt_table opts[] = {
 	OPT_WITH_ARG("--num-connections|-n <arg>",
 		     opt_set_uintval, opt_show_uintval,
 		     &opt.n_conns, "Number of connections"),
+	OPT_WITHOUT_ARG("--out-csv", opt_set_bool, &opt.output_csv,
+			"Print output in terse CSV format"),
+	OPT_WITHOUT_ARG("--out-hdr", opt_set_bool, &opt.output_hdr,
+			"Include column name header in the CSV output"),
 	OPT_WITHOUT_ARG("--verbose|-v", opt_inc_intval, &verbose,
 			"Verbose mode (can be specified more than once)"),
 	OPT_WITHOUT_ARG("--quiet|-q", opt_dec_intval, &verbose,
@@ -392,6 +398,54 @@ dump_result(struct kpm_test_results *result, const char *dir,
 		      result->res[r].p9999 * 128 / 1000);
 }
 
+static void
+dump_result_machine(struct kpm_test_results *result, const char *dir,
+		    struct kpm_connect_reply *conns, bool local)
+{
+	struct kpm_cpu_load *cpu;
+	int flow_cpu;
+	__u64 bytes;
+	int i, r = 0;
+
+	/* Headers once on the first line */
+	if (local && opt.output_hdr) {
+		for (i = 0; i < 2; i++) {
+			printf("tcp,,,,,,net,,,,app,,,,");
+			printf(i ? "\n" : ",");
+		}
+		for (i = 0; i < 2; i++) {
+			printf("retrans,ce,rtt,rttvar,swnd,cwnd,");
+			printf("usr,sys,idle,sirq,");
+			if (opt.pin_off)
+				printf("usr,sys,idle,sirq,");
+			printf("data");
+			printf(i ? "\n" : ",");
+		}
+	}
+
+	printf("%u,%u,%u,%u,%u,%u,",
+	       result->res[r].retrans, result->res[r].delivered_ce,
+	       result->res[r].rtt, result->res[r].rttvar,
+	       result->res[r].snd_wnd, result->res[r].snd_cwnd);
+
+	flow_cpu = local ? conns[r].local.cpu : conns[r].remote.cpu;
+	cpu = &result->cpu_load[flow_cpu];
+	printf("%.4f,%.4f,%.4f,%.4f,",
+	       cpu->user / 10000.0, cpu->system / 10000.0,
+	       cpu->idle / 10000.0, cpu->sirq / 10000.0);
+
+	if (opt.pin_off) {
+		cpu = &result->cpu_load[flow_cpu + opt.pin_off];
+		printf("%.4f,%.4f,%.4f,%.4f,",
+		       cpu->user / 10000.0, cpu->system / 10000.0,
+		       cpu->idle / 10000.0, cpu->sirq / 10000.0);
+	}
+
+	bytes = local ? result->res[r].tx_bytes : result->res[r].rx_bytes;
+	printf("%.3lf", (double)bytes * 8 / result->time_usec / 1000);
+	printf(local ? "," : "\n");
+}
+
 int main(int argc, char *argv[])
 {
 	unsigned int src_ncpus, dst_ncpus;
@@ -574,6 +628,8 @@ int main(int argc, char *argv[])
 	    result->hdr.len < sz)
 		warnx("Invalid result %d %d",
 		      result->hdr.type, result->hdr.len);
+	else if (opt.output_csv)
+		dump_result_machine(result, "Source", conns, true);
 	else
 		dump_result(result, "Source", conns, true);
 	free(result);
@@ -593,6 +649,8 @@ int main(int argc, char *argv[])
 	    result->hdr.len < sizeof(*result) + sizeof(result->res[0]))
 		warnx("Invalid result %d %d",
 		      result->hdr.type, result->hdr.len);
+	else if (opt.output_csv)
+		dump_result_machine(result, "Source", conns, false);
 	else
 		dump_result(result, "Target", conns, false);
 	free(result);
