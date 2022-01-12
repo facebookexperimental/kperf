@@ -178,6 +178,7 @@ struct kpm_test_results {
 		__u32 reqs;
 
 		__u32 retrans;
+		__u32 reord_seen;
 		__u32 rtt;
 		__u32 rttvar;
 		__u32 delivered_ce;

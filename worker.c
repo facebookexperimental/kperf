@@ -187,6 +187,8 @@ static void worker_report_test(struct worker_state *self)
 
 		data->retrans	= info.tcpi_total_retrans -
 			conn->init_info.tcpi_total_retrans;
+		data->reord_seen = info.tcpi_reord_seen -
+			conn->init_info.tcpi_reord_seen;
 		data->rtt	= info.tcpi_rtt;
 		data->rttvar	= info.tcpi_rttvar;
 		data->delivered_ce = info.tcpi_delivered_ce -

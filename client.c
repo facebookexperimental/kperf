@@ -330,10 +330,11 @@ dump_result(struct kpm_test_results *result, const char *dir,
 		      1000,
 		      result->res[r].rx_bytes,
 		      result->time_usec);
-	warnx("  TCP retrans rtt rttvar d_ce snd_wnd cwnd");
+	warnx("  TCP retrans reord rtt rttvar d_ce snd_wnd cwnd");
 	for (r = 0; r < opt.n_conns; r++)
-		warnx("      %7u %3u %6u %4u %7u %4u",
-		      result->res[r].retrans, result->res[r].rtt,
+		warnx("      %7u %5u %3u %6u %4u %7u %4u",
+		      result->res[r].retrans, result->res[r].reord_seen,
+		      result->res[r].rtt,
 		      result->res[r].rttvar, result->res[r].delivered_ce,
 		      result->res[r].snd_wnd, result->res[r].snd_cwnd);
 
@@ -402,46 +403,76 @@ static void
 dump_result_machine(struct kpm_test_results *result, const char *dir,
 		    struct kpm_connect_reply *conns, bool local)
 {
+	struct kpm_test_result res = {};
 	struct kpm_cpu_load *cpu;
+	unsigned int r;
 	int flow_cpu;
 	__u64 bytes;
-	int i, r = 0;
+	int i;
+
+	for (r = 0; r < opt.n_conns; r++) {
+#define S(f) res.f += result->res[r].f;
+		S(rx_bytes);
+		S(tx_bytes);
+		S(reqs);
+		S(retrans);
+		S(reord_seen);
+		S(rtt);
+		S(rttvar);
+		S(delivered_ce);
+		S(snd_wnd);
+		S(snd_cwnd);
+#undef S
+	}
+	res.rtt /= opt.n_conns;
+	res.rttvar /= opt.n_conns;
+	res.snd_wnd /= opt.n_conns;
+	res.snd_cwnd /= opt.n_conns;
+	r = 0;
 
 	/* Headers once on the first line */
 	if (local && opt.output_hdr) {
 		for (i = 0; i < 2; i++) {
-			printf("tcp,,,,,,net,,,,app,,,,");
-			printf(i ? "\n" : ",");
+			printf("tcp,,,,,,,");
+			if (opt.n_conns < 2) {
+				printf("net,,,,");
+				if (opt.pin_off)
+					printf("app,,,,");
+			}
+			printf("data%c", i ? '\n' : ',');
 		}
 		for (i = 0; i < 2; i++) {
-			printf("retrans,ce,rtt,rttvar,swnd,cwnd,");
-			printf("usr,sys,idle,sirq,");
-			if (opt.pin_off)
+			printf("retrans,reord,ce,rtt,rttvar,swnd,cwnd,");
+			if (opt.n_conns < 2) {
 				printf("usr,sys,idle,sirq,");
-			printf("data");
-			printf(i ? "\n" : ",");
+				if (opt.pin_off)
+					printf("usr,sys,idle,sirq,");
+			}
+			printf(i ? "rx\n" : "tx,");
 		}
 	}
 
-	printf("%u,%u,%u,%u,%u,%u,",
-	       result->res[r].retrans, result->res[r].delivered_ce,
-	       result->res[r].rtt, result->res[r].rttvar,
-	       result->res[r].snd_wnd, result->res[r].snd_cwnd);
+	printf("%u,%u,%u,%u,%u,%u,%u,",
+	       res.retrans, res.reord_seen, res.delivered_ce,
+	       res.rtt, res.rttvar, res.snd_wnd, res.snd_cwnd);
 
-	flow_cpu = local ? conns[r].local.cpu : conns[r].remote.cpu;
-	cpu = &result->cpu_load[flow_cpu];
-	printf("%.4f,%.4f,%.4f,%.4f,",
-	       cpu->user / 10000.0, cpu->system / 10000.0,
-	       cpu->idle / 10000.0, cpu->sirq / 10000.0);
-
-	if (opt.pin_off) {
-		cpu = &result->cpu_load[flow_cpu + opt.pin_off];
+	/* Dunno how to report CPU use, yet */
+	if (opt.n_conns < 2) {
+		flow_cpu = local ? conns[r].local.cpu : conns[r].remote.cpu;
+		cpu = &result->cpu_load[flow_cpu];
 		printf("%.4f,%.4f,%.4f,%.4f,",
 		       cpu->user / 10000.0, cpu->system / 10000.0,
 		       cpu->idle / 10000.0, cpu->sirq / 10000.0);
+
+		if (opt.pin_off) {
+			cpu = &result->cpu_load[flow_cpu + opt.pin_off];
+			printf("%.4f,%.4f,%.4f,%.4f,",
+			       cpu->user / 10000.0, cpu->system / 10000.0,
+			       cpu->idle / 10000.0, cpu->sirq / 10000.0);
+		}
 	}
 
-	bytes = local ? result->res[r].tx_bytes : result->res[r].rx_bytes;
+	bytes = local ? res.tx_bytes : res.rx_bytes;
 	printf("%.3lf", (double)bytes * 8 / result->time_usec / 1000);
 	printf(local ? "," : "\n");
 }
