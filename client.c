@@ -46,6 +46,7 @@ static struct {
 	int cpu_dst_wrk;
 	unsigned int mss;
 	unsigned int n_conns;
+	unsigned int max_pace;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
 	.src = "localhost",
@@ -102,6 +103,8 @@ static const struct opt_table opts[] = {
 		     "Time stats - (0) none, (1) hist, (2) hist+pstats"),
 	OPT_WITH_ARG("--mss|-M <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.mss, "MSS for TCP"),
+	OPT_WITH_ARG("--max-pace <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.max_pace, "MSS for TCP"),
 	OPT_WITHOUT_ARG("--tls", opt_set_bool, &opt.tls,
 			"Enable TLS in both directions"),
 	OPT_WITH_ARG("--tls-ver <arg>", opt_set_uintval, opt_show_uinthex,
@@ -220,6 +223,14 @@ again:
 			kpm_req_disconnect(dst, id->remote.id);
 		}
 		free(id);
+	}
+
+	for (i = 0; i < opt.n_conns; i++) {
+		if (opt.max_pace) {
+			if (kpm_req_pacing(src, conns[i].local.id, opt.max_pace) ||
+			    kpm_req_pacing(dst, conns[i].remote.id, opt.max_pace))
+				err(8, "Failed to set pacing rate");
+		}
 	}
 
 	free(seq);

@@ -404,6 +404,44 @@ err_quit:
 }
 
 static void
+server_msg_max_pacing(struct session_state *self, struct kpm_header *hdr)
+{
+	struct kpm_max_pacing *req;
+	struct connection *conn;
+
+	if (hdr->len < sizeof(*req)) {
+		warn("Invalid request in %s", __func__);
+		goto err_quit;
+	}
+	req = (void *)hdr;
+
+	conn = session_find_connection_by_id(self, req->id);
+	if (!conn) {
+		warnx("connection not found");
+		kpm_reply_error(self->main_sock, hdr, ENOENT);
+		goto err_quit;
+	}
+
+	if (setsockopt(conn->fd, SOL_SOCKET, SO_MAX_PACING_RATE,
+		       &req->max_pacing, sizeof(req->max_pacing))) {
+		warn("setting pacing rate failed");
+		goto err_repl_errno;
+	}
+
+	if (kpm_reply_empty(self->main_sock, hdr) < 1) {
+		warnx("Reply failed");
+		goto err_quit;
+	}
+
+	return;
+
+err_repl_errno:
+	kpm_reply_error(self->main_sock, hdr, errno);
+err_quit:
+	self->quit = 1;
+}
+
+static void
 server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 {
 	struct epoll_event ev = {};
@@ -689,6 +727,9 @@ static void session_handle_main_sock(struct session_state *self)
 		break;
 	case KPM_MSG_TYPE_TLS:
 		server_msg_tls(self, hdr);
+		break;
+	case KPM_MSG_TYPE_MAX_PACING:
+		server_msg_max_pacing(self, hdr);
 		break;
 	case KPM_MSG_TYPE_SPAWN_PWORKER:
 		server_msg_spawn_pworker(self, hdr);

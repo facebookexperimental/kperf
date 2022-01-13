@@ -21,6 +21,7 @@ enum kpm_msg_type {
 	KPM_MSG_TYPE_DISCONNECT,
 	KPM_MSG_TYPE_CONNECTION_ID,
 	KPM_MSG_TYPE_TLS,
+	KPM_MSG_TYPE_MAX_PACING,
 	KPM_MSG_TYPE_TEST,
 	KPM_MSG_TYPE_TEST_RESULT,
 	KPM_MSG_TYPE_END_TEST,
@@ -100,6 +101,12 @@ struct kpm_connection_id {
 	struct kpm_header hdr;
 	__u32 id;
 	__u32 cpu;
+};
+
+struct kpm_max_pacing {
+	struct kpm_header hdr;
+	__u32 id;
+	__u32 max_pacing;
 };
 
 enum kpm_tls_mask {
@@ -230,6 +237,7 @@ int kpm_send_connect(int fd, struct sockaddr_in6 *addr, socklen_t len,
 		     __u32 mss);
 int kpm_send_tls(int fd, __u32 conn_id, __u32 dir_mask,
 		 void *info, socklen_t len);
+int kpm_send_max_pacing(int fd, __u32 id, __u32 max_pace);
 int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu);
 
 void kpm_reply_error(int fd, struct kpm_header *hdr, __u16 error);
@@ -250,6 +258,7 @@ int kpm_req_tcp_sock(int fd, struct sockaddr_in6 *addr, socklen_t *len);
 int kpm_req_end_test(int fd, __u32 test_id);
 int kpm_req_tls(int fd, __u32 conn_id, __u32 dir_mask,
 		void *info, socklen_t len);
+int kpm_req_pacing(int fd, __u32 conn_id, __u32 max_pace);
 int kpm_req_disconnect(int fd, __u32 connection_id);
 
 #endif /* PROTO_H */

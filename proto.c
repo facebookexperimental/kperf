@@ -160,6 +160,16 @@ kpm_send_tls(int fd, __u32 conn_id, __u32 dir_mask, void *info, socklen_t len)
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_TLS);
 }
 
+int kpm_send_max_pacing(int fd, __u32 id, __u32 pace)
+{
+	struct kpm_max_pacing msg;
+
+	msg.id = id;
+	msg.max_pacing = pace;
+
+	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_MAX_PACING);
+}
+
 int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu)
 {
 	struct kpm_pin_worker msg;
@@ -357,6 +367,34 @@ kpm_req_tls(int fd, __u32 conn_id, __u32 dir_mask, void *info, socklen_t len)
 
 	if (!kpm_good_reply(repl, KPM_MSG_TYPE_TLS, id)) {
 		warnx("Failed to start TLS - bad reply");
+		free(repl);
+		return -1;
+	}
+
+	free(repl);
+	return 0;
+}
+
+int
+kpm_req_pacing(int fd, __u32 conn_id, __u32 max_pace)
+{
+	struct kpm_empty *repl;
+	int id;
+
+	id = kpm_send_max_pacing(fd, conn_id, max_pace);
+	if (id < 0) {
+		warnx("Failed to request pacing");
+		return id;
+	}
+
+	repl = kpm_receive(fd);
+	if (!repl) {
+		warnx("Failed to request pacing - no response");
+		return -1;
+	}
+
+	if (!kpm_good_reply(repl, KPM_MSG_TYPE_MAX_PACING, id)) {
+		warnx("Failed to request pacing - bad reply");
 		free(repl);
 		return -1;
 	}
