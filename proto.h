@@ -94,6 +94,7 @@ struct kpm_connect_reply {
 	struct {
 		__u32 id;
 		__u32 cpu;
+		__u16 port;
 	} local, remote;
 };
 
@@ -249,8 +250,8 @@ int kpm_reply_u32(int fd, struct kpm_header *hdr, __u32 arg);
 int kpm_reply_acceptor(int fd, struct kpm_header *hdr,
 		       struct sockaddr_in6 *addr, socklen_t len);
 int kpm_reply_connect(int fd, struct kpm_header *hdr,
-		      __u32 local_id, __u32 local_cpu,
-		      __u32 remote_id, __u32 remote_cpu);
+		      __u32 local_id, __u32 local_cpu, __u16 local_port,
+		      __u32 remote_id, __u32 remote_cpu, __u16 remote_port);
 
 int kpm_xchg_hello(int fd, unsigned int *ncpus);
 

@@ -234,15 +234,17 @@ int kpm_reply_acceptor(int fd, struct kpm_header *hdr,
 }
 
 int kpm_reply_connect(int fd, struct kpm_header *hdr,
-		      __u32 local_id, __u32 local_cpu,
-		      __u32 remote_id, __u32 remote_cpu)
+		      __u32 local_id, __u32 local_cpu, __u16 local_port,
+		      __u32 remote_id, __u32 remote_cpu, __u16 remote_port)
 {
 	struct kpm_connect_reply msg;
 
 	msg.local.id = local_id;
 	msg.local.cpu = local_cpu;
+	msg.local.port = local_port;
 	msg.remote.id = remote_id;
 	msg.remote.cpu = remote_cpu;
+	msg.remote.port = remote_port;
 
 	return kpm_reply(fd, &msg.hdr, sizeof(msg), hdr);
 }

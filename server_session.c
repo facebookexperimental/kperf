@@ -204,7 +204,9 @@ server_msg_tcp_acceptor(struct session_state *self, struct kpm_header *req)
 static void
 server_msg_connect(struct session_state *self, struct kpm_header *hdr)
 {
+	unsigned short local_port, remote_port;
 	struct kpm_connection_id *id;
+	struct sockaddr_in6 addr;
 	struct kpm_connect *req;
 	struct connection *conn;
 	socklen_t len;
@@ -264,8 +266,23 @@ server_msg_connect(struct session_state *self, struct kpm_header *hdr)
 		goto err_free_id;
 	}
 
-	if (kpm_reply_connect(self->main_sock, hdr, conn->id, conn->cpu,
-			      id->id, id->cpu) < 1) {
+	len = sizeof(addr);
+	if (getsockname(cfd, &addr, &len)) {
+		warn("Failed to read address of socket");
+		goto err_free_id;
+	}
+	local_port = ntohs(addr.sin6_port);
+
+	len = sizeof(addr);
+	if (getpeername(cfd, &addr, &len)) {
+		warn("Failed to read address of socket");
+		goto err_free_id;
+	}
+	remote_port = ntohs(addr.sin6_port);
+
+	if (kpm_reply_connect(self->main_sock, hdr,
+			      conn->id, conn->cpu, local_port,
+			      id->id, id->cpu, remote_port) < 1) {
 		warn("Failed to reply");
 		goto err_free_id;
 	}
@@ -937,4 +954,3 @@ server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen)
 
 	server_session(fd);
 }
-
