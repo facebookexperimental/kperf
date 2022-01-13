@@ -2,10 +2,13 @@
 /* Copyright Meta Platforms, Inc. and affiliates */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -21,17 +24,23 @@ int verbose;
 
 static struct {
 	char *service;
+	char *pid_file;
+	bool kill;
 	bool server;
 } opt = {
 	.server		= true,
 	.service	= "18323",
+	.pid_file	= "/tmp/kperf.pid",
 };
 
 static const struct opt_table opts[] = {
-	OPT_WITHOUT_ARG("--no-daemon", opt_set_invbool, &opt.server,
-			"Don't start a daemon"),
  	OPT_WITH_ARG("--port|-p <arg>", opt_set_charp, opt_show_charp,
 		     &opt.service, "Set control port/service to listen on"),
+	OPT_WITHOUT_ARG("--no-daemon", opt_set_invbool, &opt.server,
+			"Don't start a daemon"),
+	OPT_WITH_ARG("--pid-file <arg>", opt_set_charp, opt_show_charp,
+		     &opt.pid_file, "Set daemon identity / pid file"),
+	OPT_WITHOUT_ARG("--kill", opt_set_bool, &opt.kill, "Stop the daemon"),
  	OPT_WITHOUT_ARG("--verbose|-v", opt_inc_intval, &verbose,
 			"Verbose mode (can be specified more than once)"),
  	OPT_WITHOUT_ARG("--usage|--help|-h", opt_usage_and_exit,
@@ -86,6 +95,60 @@ static void server_reap_sessions(void)
 	}
 }
 
+static void kill_old_daemon(void)
+{
+	char buf[10];
+	ssize_t n;
+	pid_t pid;
+	int fd;
+
+	fd = open(opt.pid_file, O_RDONLY);
+	if (fd < 0) {
+		if (errno == ENOENT)
+			return;
+		err(2, "Failed to open PID file");
+	}
+
+	n = read(fd, buf, sizeof(buf));
+	if (n < 0)
+		err(2, "Failed to read PID file");
+	if (!n || n == sizeof(buf))
+		errx(2, "Bad pid file len - %zd", n);
+	buf[n] = 0;
+	close(fd);
+
+	pid = atoi(buf);
+
+	if (kill(pid, SIGKILL))
+		if (errno != ESRCH)
+			err(2, "Can't kill the old daemon");
+
+	if (unlink(opt.pid_file))
+		err(2, "Failed to remove pid file");
+}
+
+static void server_daemonize(void)
+{
+	char buf[10];
+	ssize_t n;
+	int fd;
+
+	fd = open(opt.pid_file, O_WRONLY | O_CREAT | O_EXCL, 00660);
+	if (fd < 0)
+		err(3, "Failed to create PID file");
+
+	if (!daemonize())
+		err(1, "can't daemonize");
+
+	n = snprintf(buf, sizeof(buf), "%d", getpid());
+	if (!n || n == sizeof(buf))
+		errx(3, "Bad pid file len - %zd", n);
+
+	if (write(fd, buf, n) != n)
+		err(3, "Short write to pid file");
+	close(fd);
+}
+
 int main(int argc, char *argv[])
 {
 	int fds[2], i, num_fds, max_fd;
@@ -97,8 +160,13 @@ int main(int argc, char *argv[])
 
 	err_set_progname(argv[0]);
 
-	if (opt.server && !daemonize())
-		err(1, "can't daemonize");
+	if (opt.server || opt.kill)
+		kill_old_daemon();
+	if (opt.kill)
+		return 0;
+
+	if (opt.server)
+		server_daemonize();
 
 	addr = net_server_lookup(opt.service, AF_UNSPEC, SOCK_STREAM);
 	if (!addr)
