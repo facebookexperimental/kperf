@@ -952,5 +952,6 @@ server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen)
 	if (ses->pid)
 		return ses;
 
+	free(ses);
 	server_session(fd);
 }

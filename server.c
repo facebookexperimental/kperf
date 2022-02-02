@@ -82,7 +82,6 @@ static void server_reap_sessions(void)
 	if (!chld)
 		return;
 
-
 	while (true) {
 		int status;
 		pid_t pid;
