@@ -178,11 +178,11 @@ again:
 		bim_unique = good &&
 			bim_add_edge(bim, id->local.cpu, id->remote.cpu, id);
 
-		warnx("Connection established %d:cpu %d | %d:cpu %d - %s",
-		      id->local.id, id->local.cpu,
-		      id->remote.id, id->remote.cpu,
-		      good && bim_unique ? "good" :
-		      (good ? "duplicate" : "out of range"));
+		kpm_dbg("Connection established %d:cpu %d | %d:cpu %d - %s",
+			id->local.id, id->local.cpu,
+			id->remote.id, id->remote.cpu,
+			good && bim_unique ? "good" :
+			(good ? "duplicate" : "out of range"));
 
 		if (!bim_unique) {
 			bool fail = kpm_req_disconnect(src, id->local.id) < 0 ||
@@ -204,9 +204,9 @@ again:
 		id = m.cookie;
 
 		if (m.is_match && i < opt.n_conns) {
-			warnx("Connected %d:cpu %d | %d:cpu %d",
-			      id->local.id, id->local.cpu,
-			      id->remote.id, id->remote.cpu);
+			kpm_info("Connected %d:cpu %d | %d:cpu %d",
+				 id->local.id, id->local.cpu,
+				 id->remote.id, id->remote.cpu);
 			memcpy(&conns[i], id, sizeof(*id));
 			i++;
 		} else {
