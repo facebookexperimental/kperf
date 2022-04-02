@@ -137,7 +137,8 @@ enum kpm_test_type {
 	KPM_TEST_TYPE_RR,
 };
 
-#define KPM_MAX_OP_CHUNK		(1 << 17)
+#define KPM_DFL_OP_CHUNK		(1 << 16)
+#define KPM_MAX_OP_CHUNK		(1 << 27)
 
 struct kpm_test {
 	struct kpm_header hdr;

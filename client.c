@@ -54,6 +54,8 @@ static struct {
 	.src_svc = "18323",
 	.dst_svc = "18323",
 	.req_size = ~0U,
+	.read_size = KPM_DFL_OP_CHUNK,
+	.write_size = KPM_DFL_OP_CHUNK,
 	.time = 5,
 	.cpu_min = 0,
 	.cpu_max = 255,

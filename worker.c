@@ -43,8 +43,6 @@ struct connection {
 	int fd;
 	unsigned int read_size;
 	unsigned int write_size;
-	unsigned int send_pat_off;
-	unsigned int recv_pat_off;
 	__u64 to_send;
 	__u64 to_recv;
 	__u64 tot_sent;
@@ -63,7 +61,8 @@ struct connection {
 	struct list_node connections;
 };
 
-static unsigned char patbuf[KPM_MAX_OP_CHUNK * 2];
+#define PATTERN_PERIOD 255
+static unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
 
 static struct connection *
@@ -211,6 +210,7 @@ skip_results:
 	self->test = NULL;
 
 	kpm_send(self->main_sock, &res->hdr, sz, KPM_MSG_WORKER_TEST_RESULT);
+	free(res);
 }
 
 #define KPM_HNDL(type, name)						\
@@ -279,11 +279,13 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 
 		list_add(&self->connections, &conn->connections);
 
-		conn->read_size = conn->spec->read_size ?: KPM_MAX_OP_CHUNK / 2;
-		conn->write_size = conn->spec->write_size ?: KPM_MAX_OP_CHUNK / 2;
-		if (conn->read_size > KPM_MAX_OP_CHUNK ||
-		    conn->write_size > KPM_MAX_OP_CHUNK) {
-			warnx("oversized io op");
+		conn->read_size = conn->spec->read_size;
+		conn->write_size = conn->spec->write_size;
+
+		if (!conn->read_size || conn->read_size > KPM_MAX_OP_CHUNK ||
+		    !conn->write_size || conn->write_size > KPM_MAX_OP_CHUNK) {
+			warnx("wrong size io op read:%u write:%u",
+			      conn->read_size, conn->write_size);
 			self->quit = 1;
 			return;
 		}
@@ -485,7 +487,7 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 	unsigned int rep = 10;
 
 	while (rep--) {
-		void *src = &patbuf[conn->send_pat_off];
+		void *src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
 		size_t chunk;
 		ssize_t n;
 
@@ -510,9 +512,6 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 
 		conn->to_send -= n;
 		conn->tot_sent += n;
-		conn->send_pat_off += n;
-		if (conn->send_pat_off >= sizeof(patbuf) / 2)
-			conn->send_pat_off -= sizeof(patbuf) / 2;
 
 		if (!conn->to_send) {
 			worker_send_finished(self, conn, events);
@@ -530,11 +529,17 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 static void
 worker_handle_recv(struct worker_state *self, struct connection *conn)
 {
-	unsigned char buf[sizeof(patbuf) / 2];
 	unsigned int rep = 10;
+	unsigned char *buf;
+
+	buf = malloc(conn->read_size);
+	if (!buf) {
+		warnx("No memory");
+		return;
+	}
 
 	while (rep--) {
-		void *src = &patbuf[conn->recv_pat_off];
+		void *src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
 		size_t chunk;
 		ssize_t n;
 
@@ -543,24 +548,24 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 		if (n == 0) {
 			warnx("zero recv");
 			worker_kill_conn(self, conn);
-			return;
+			break;
 		}
 		if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return;
+				break;;
 			warn("Recv failed");
 			worker_kill_conn(self, conn);
-			return;
+			break;
 		}
 
 		if (memcmp(buf, src, n))
-			warn("Data corruption");
+			warnx("Data corruption %d %d %ld %lld %lld %d",
+			      *buf, *(char *)src, n,
+			      conn->tot_recv % PATTERN_PERIOD,
+			      conn->tot_recv, rep);
 
 		conn->to_recv -= n;
 		conn->tot_recv += n;
-		conn->recv_pat_off += n;
-		if (conn->recv_pat_off >= sizeof(patbuf) / 2)
-			conn->recv_pat_off -= sizeof(patbuf) / 2;
 
 		if (!conn->to_recv) {
 			worker_recv_finished(self, conn);
@@ -571,8 +576,10 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 		}
 
 		if (n != conn->read_size)
-			return;
+			break;
 	}
+
+	free(buf);
 }
 
 static void
@@ -608,7 +615,8 @@ void NORETURN pworker_main(int fd)
 {
 	struct worker_state self = { .main_sock = fd, };
 	struct epoll_event ev, events[32];
-	int i, j, nfds;
+	unsigned char j;
+	int i, nfds;
 
 	list_head_init(&self.connections);
 
