@@ -435,18 +435,35 @@ dump_result_machine(struct kpm_test_results *result, const char *dir,
 		S(delivered_ce);
 		S(snd_wnd);
 		S(snd_cwnd);
+
+		if (opt.time_stats < 2)
+			continue;
+		S(p25);
+		S(p50);
+		S(p90);
+		S(p99);
+		S(p999);
+		S(p9999);
 #undef S
 	}
 	res.rtt /= opt.n_conns;
 	res.rttvar /= opt.n_conns;
 	res.snd_wnd /= opt.n_conns;
 	res.snd_cwnd /= opt.n_conns;
+	res.p25 /= opt.n_conns;
+	res.p50 /= opt.n_conns;
+	res.p90 /= opt.n_conns;
+	res.p99 /= opt.n_conns;
+	res.p999 /= opt.n_conns;
+	res.p9999 /= opt.n_conns;
 	r = 0;
 
 	/* Headers once on the first line */
 	if (local && opt.output_hdr) {
 		for (i = 0; i < 2; i++) {
 			printf("tcp,,,,,,,");
+			if (opt.time_stats >= 2)
+				printf("latency,(us),,,,,");
 			if (opt.n_conns < 2) {
 				printf("net,,,,");
 				if (opt.pin_off)
@@ -456,6 +473,8 @@ dump_result_machine(struct kpm_test_results *result, const char *dir,
 		}
 		for (i = 0; i < 2; i++) {
 			printf("retrans,reord,ce,rtt,rttvar,swnd,cwnd,");
+			if (opt.time_stats >= 2)
+				printf("p25,p50,p90,p99,p999,p9999,");
 			if (opt.n_conns < 2) {
 				printf("usr,sys,idle,sirq,");
 				if (opt.pin_off)
@@ -468,6 +487,12 @@ dump_result_machine(struct kpm_test_results *result, const char *dir,
 	printf("%u,%u,%u,%u,%u,%u,%u,",
 	       res.retrans, res.reord_seen, res.delivered_ce,
 	       res.rtt, res.rttvar, res.snd_wnd, res.snd_cwnd);
+
+	if (opt.time_stats >= 2)
+		printf("%u,%u,%u,%u,%u,%u,",
+		       res.p25 * 128 / 1000, res.p50 * 128 / 1000,
+		       res.p90 * 128 / 1000, res.p99 * 128 / 1000,
+		       res.p999 * 128 / 1000, res.p9999 * 128 / 1000);
 
 	/* Dunno how to report CPU use, yet */
 	if (opt.n_conns < 2) {
