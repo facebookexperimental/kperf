@@ -106,7 +106,7 @@ static const struct opt_table opts[] = {
 	OPT_WITH_ARG("--mss|-M <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.mss, "MSS for TCP"),
 	OPT_WITH_ARG("--max-pace <arg>", opt_set_uintval, opt_show_uintval,
-		     &opt.max_pace, "MSS for TCP"),
+		     &opt.max_pace, "Max sending/pacing rate"),
 	OPT_WITHOUT_ARG("--tls", opt_set_bool, &opt.tls,
 			"Enable TLS in both directions"),
 	OPT_WITH_ARG("--tls-ver <arg>", opt_set_uintval, opt_show_uinthex,
