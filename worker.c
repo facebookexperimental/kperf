@@ -484,7 +484,7 @@ static void
 worker_handle_send(struct worker_state *self, struct connection *conn,
 		   unsigned int events)
 {
-	unsigned int rep = 10;
+	unsigned int rep = max_t(int, 10, conn->to_send / conn->write_size + 1);
 
 	while (rep--) {
 		void *src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
