@@ -47,6 +47,7 @@ static struct {
 	unsigned int mss;
 	unsigned int n_conns;
 	unsigned int max_pace;
+	char *tcp_cong_ctrl;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
 	.src = "localhost",
@@ -120,6 +121,8 @@ static const struct opt_table opts[] = {
 	OPT_WITH_ARG("--num-connections|-n <arg>",
 		     opt_set_uintval, opt_show_uintval,
 		     &opt.n_conns, "Number of connections"),
+	OPT_WITH_ARG("--tcp-cc <arg>", opt_set_charp, opt_show_charp,
+		     &opt.tcp_cong_ctrl, "Set TCP congestion control"),
 	OPT_WITHOUT_ARG("--out-csv", opt_set_bool, &opt.output_csv,
 			"Print output in terse CSV format"),
 	OPT_WITHOUT_ARG("--out-hdr", opt_set_bool, &opt.output_hdr,
@@ -232,6 +235,12 @@ again:
 			if (kpm_req_pacing(src, conns[i].local.id, opt.max_pace) ||
 			    kpm_req_pacing(dst, conns[i].remote.id, opt.max_pace))
 				err(8, "Failed to set pacing rate");
+		}
+
+		if (opt.tcp_cong_ctrl) {
+			if (kpm_req_tcp_cc(src, conns[i].local.id, opt.tcp_cong_ctrl) ||
+			    kpm_req_tcp_cc(dst, conns[i].remote.id, opt.tcp_cong_ctrl))
+				err(8, "Failed to set TCP cong control");
 		}
 	}
 
@@ -542,6 +551,9 @@ int main(int argc, char *argv[])
 	if (opt.read_size > KPM_MAX_OP_CHUNK ||
 	    opt.write_size > KPM_MAX_OP_CHUNK)
 		errx(1, "Max read/write size is %d", KPM_MAX_OP_CHUNK);
+	if (opt.tcp_cong_ctrl &&
+	    strnlen(opt.tcp_cong_ctrl, KPM_CC_NAME_LEN) == KPM_CC_NAME_LEN)
+		errx(1, "TCP CC name is too long");
 
 	src_wrk_id = calloc(opt.n_conns, sizeof(*src_wrk_id));
 	dst_wrk_id = calloc(opt.n_conns, sizeof(*dst_wrk_id));

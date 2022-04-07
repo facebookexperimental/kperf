@@ -170,6 +170,16 @@ int kpm_send_max_pacing(int fd, __u32 id, __u32 pace)
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_MAX_PACING);
 }
 
+int kpm_send_tcp_cc(int fd, __u32 id, char *cc_name)
+{
+	struct kpm_tcp_cc msg = {};
+
+	msg.id = id;
+	strncpy(msg.cc_name, cc_name, sizeof(msg.cc_name) - 1);
+
+	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_TCP_CC);
+}
+
 int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu)
 {
 	struct kpm_pin_worker msg;
@@ -397,6 +407,34 @@ kpm_req_pacing(int fd, __u32 conn_id, __u32 max_pace)
 
 	if (!kpm_good_reply(repl, KPM_MSG_TYPE_MAX_PACING, id)) {
 		warnx("Failed to request pacing - bad reply");
+		free(repl);
+		return -1;
+	}
+
+	free(repl);
+	return 0;
+}
+
+int
+kpm_req_tcp_cc(int fd, __u32 conn_id, char *cc_name)
+{
+	struct kpm_empty *repl;
+	int id;
+
+	id = kpm_send_tcp_cc(fd, conn_id, cc_name);
+	if (id < 0) {
+		warnx("Failed to request TCP cong control");
+		return id;
+	}
+
+	repl = kpm_receive(fd);
+	if (!repl) {
+		warnx("Failed to request TCP cong control - no response");
+		return -1;
+	}
+
+	if (!kpm_good_reply(repl, KPM_MSG_TYPE_TCP_CC, id)) {
+		warnx("Failed to request TCP cong control - bad reply");
 		free(repl);
 		return -1;
 	}

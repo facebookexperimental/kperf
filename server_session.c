@@ -459,6 +459,44 @@ err_quit:
 }
 
 static void
+server_msg_tcp_cc(struct session_state *self, struct kpm_header *hdr)
+{
+	struct connection *conn;
+	struct kpm_tcp_cc *req;
+
+	if (hdr->len < sizeof(*req)) {
+		warn("Invalid request in %s", __func__);
+		goto err_quit;
+	}
+	req = (void *)hdr;
+
+	conn = session_find_connection_by_id(self, req->id);
+	if (!conn) {
+		warnx("connection not found");
+		kpm_reply_error(self->main_sock, hdr, ENOENT);
+		goto err_quit;
+	}
+
+	if (setsockopt(conn->fd, IPPROTO_TCP, TCP_CONGESTION, &req->cc_name,
+		       strnlen(req->cc_name, sizeof(req->cc_name)))) {
+		warn("setting TCP cong contorl failed");
+		goto err_repl_errno;
+	}
+
+	if (kpm_reply_empty(self->main_sock, hdr) < 1) {
+		warnx("Reply failed");
+		goto err_quit;
+	}
+
+	return;
+
+err_repl_errno:
+	kpm_reply_error(self->main_sock, hdr, errno);
+err_quit:
+	self->quit = 1;
+}
+
+static void
 server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 {
 	struct epoll_event ev = {};
@@ -747,6 +785,9 @@ static void session_handle_main_sock(struct session_state *self)
 		break;
 	case KPM_MSG_TYPE_MAX_PACING:
 		server_msg_max_pacing(self, hdr);
+		break;
+	case KPM_MSG_TYPE_TCP_CC:
+		server_msg_tcp_cc(self, hdr);
 		break;
 	case KPM_MSG_TYPE_SPAWN_PWORKER:
 		server_msg_spawn_pworker(self, hdr);
