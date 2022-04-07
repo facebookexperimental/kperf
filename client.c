@@ -28,6 +28,7 @@ static struct {
 	bool tls_nopad;
 	bool output_csv;
 	bool output_hdr;
+	bool xpin;
 	unsigned int tls_ver;
 	char *src;
 	char *dst;
@@ -99,6 +100,7 @@ static const struct opt_table opts[] = {
 		     &opt.cpu_src_wrk, "max CPU number for connection"),
 	OPT_WITH_ARG("--cpu-dst-wrk <arg>", opt_set_intval, opt_show_intval,
 		     &opt.cpu_dst_wrk, "max CPU number for connection"),
+	OPT_WITHOUT_ARG("--cross-pin", opt_set_bool, &opt.xpin, "Cross-pin"),
 	OPT_WITH_ARG("--time|-t <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.time, "Test length"),
 	OPT_WITH_ARG("--time-stats|-T <arg>", opt_set_uintval, opt_show_uintval,
@@ -554,6 +556,14 @@ int main(int argc, char *argv[])
 	if (opt.tcp_cong_ctrl &&
 	    strnlen(opt.tcp_cong_ctrl, KPM_CC_NAME_LEN) == KPM_CC_NAME_LEN)
 		errx(1, "TCP CC name is too long");
+	if (opt.xpin) {
+		if (opt.cpu_src_wrk != -1 || opt.cpu_dst_wrk != -1)
+			errx(1, "Cross-pin can't use explicit pin");
+		if (opt.pin_off)
+			errx(1, "Cross-pin can't use pin off");
+		if (opt.n_conns != 2)
+			errx(1, "Cross-pin only works with 2 connections");
+	}
 
 	src_wrk_id = calloc(opt.n_conns, sizeof(*src_wrk_id));
 	dst_wrk_id = calloc(opt.n_conns, sizeof(*dst_wrk_id));
@@ -633,12 +643,18 @@ int main(int argc, char *argv[])
 	for (i = 0; i < opt.n_conns; i++) {
 		struct kpm_connect_reply *id = &conns[i];
 
-		src_wrk_cpu[i] = opt.cpu_src_wrk;
-		if (opt.cpu_src_wrk == -1)
+		if (opt.xpin)
+			src_wrk_cpu[i] = conns[!i].local.cpu;
+		else if (opt.cpu_src_wrk != -1)
+			src_wrk_cpu[i] = opt.cpu_src_wrk;
+		else
 			src_wrk_cpu[i] = id->local.cpu + opt.pin_off;
 
-		dst_wrk_cpu[i] = opt.cpu_dst_wrk;
-		if (opt.cpu_dst_wrk == -1)
+		if (opt.xpin)
+			dst_wrk_cpu[i] = conns[!i].remote.cpu;
+		if (opt.cpu_dst_wrk != -1)
+			dst_wrk_cpu[i] = opt.cpu_dst_wrk;
+		else
 			dst_wrk_cpu[i] = id->remote.cpu + opt.pin_off;
 
 		if (spawn_worker(src, src_wrk_cpu[i], &src_wrk_id[i]) ||
