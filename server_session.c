@@ -337,8 +337,6 @@ err_quit:
 	self->quit = 1;
 }
 
-#define TLS_RX_EXPECT_NO_PAD   3
-
 static void
 server_msg_tls(struct session_state *self, struct kpm_header *hdr)
 {
