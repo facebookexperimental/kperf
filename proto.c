@@ -115,18 +115,19 @@ int kpm_send_u32(int fd, enum kpm_msg_type type, __u32 arg)
 	return kpm_send(fd, &msg.hdr, sizeof(msg), type);
 }
 
-int kpm_send_conn_id(int fd, __u32 id, __u32 cpu)
+int kpm_send_conn_id(int fd, __u32 id, __u32 cpu, __u32 flags)
 {
 	struct kpm_connection_id msg;
 
 	msg.id = id;
 	msg.cpu = cpu;
+	msg.flags = flags;
 
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_CONNECTION_ID);
 }
 
 int kpm_send_connect(int fd, struct sockaddr_in6 *addr, socklen_t len,
-		     __u32 mss)
+		     __u32 mss, __u32 flags)
 {
 	struct kpm_connect msg;
 
@@ -138,6 +139,7 @@ int kpm_send_connect(int fd, struct sockaddr_in6 *addr, socklen_t len,
 	msg.len = len;
 	memcpy(&msg.addr, addr, len);
 	msg.mss = mss;
+	msg.flags = flags;
 
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_CONNECT);
 }
@@ -158,6 +160,22 @@ kpm_send_tls(int fd, __u32 conn_id, __u32 dir_mask, void *info, socklen_t len)
 	memcpy(&msg.info, info, len);
 
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_TLS);
+}
+
+int kpm_send_psp_params(int fd, __u32 spi, void *key, __u32 len)
+{
+	struct kpm_psp_params msg;
+
+	if (len > sizeof(msg.key)) {
+		warnx("Oversized PSP arg");
+		return -1;
+	}
+
+	msg.spi = spi;
+	msg.len = len;
+	memcpy(&msg.key, key, len);
+
+	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_PSP_PARAMS);
 }
 
 int kpm_send_max_pacing(int fd, __u32 id, __u32 pace)
@@ -259,12 +277,14 @@ int kpm_reply_connect(int fd, struct kpm_header *hdr,
 	return kpm_reply(fd, &msg.hdr, sizeof(msg), hdr);
 }
 
-int kpm_reply_conn_id(int fd, struct kpm_header *hdr, __u32 id, __u32 cpu)
+int kpm_reply_conn_id(int fd, struct kpm_header *hdr, __u32 id, __u32 cpu,
+		      __u32 flags)
 {
 	struct kpm_connection_id msg = {};
 
 	msg.id = id;
 	msg.cpu = cpu;
+	msg.flags = flags;
 
 	return kpm_reply(fd, &msg.hdr, sizeof(msg), hdr);
 }

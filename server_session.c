@@ -27,6 +27,9 @@
 #include "proto_dbg.h"
 #include "server.h"
 
+#include <ynl-c/ynl.h>
+#include <ynl-c/psp.h>
+
 struct session_state {
 	int main_sock;
 	int epollfd;
@@ -38,6 +41,7 @@ struct session_state {
 	struct list_head connections;
 	struct list_head pworkers;
 	struct list_head tests;
+	struct ynl_sock *psp;
 };
 
 struct connection {
@@ -105,6 +109,60 @@ session_find_test_by_id(struct session_state *self, unsigned int id)
 	return NULL;
 }
 
+static int psp_exchange_keys(struct session_state *self, int cfd)
+{
+	struct psp_rx_assoc_rsp *rsp;
+	struct psp_rx_assoc_req *req;
+	struct psp_tx_assoc_rsp* tsp;
+	struct psp_tx_assoc_req *teq;
+	struct kpm_psp_params *psp;
+	int ret;
+
+	if (!self->psp) {
+		struct ynl_error yerr;
+
+		self->psp = ynl_sock_create(&ynl_psp_family, &yerr);
+		if (!self->psp)
+			err(1, "YNL: %s\n", yerr.msg);
+	}
+
+	req = psp_rx_assoc_req_alloc();
+	psp_rx_assoc_req_set_version(req, 0);
+	psp_rx_assoc_req_set_sock_fd(req, cfd);
+
+	rsp = psp_rx_assoc(self->psp, req);
+	psp_rx_assoc_req_free(req);
+	if (!rsp)
+		err(2, "YNL PSP Rx assoc: %s\n", self->psp->err.msg);
+
+	ret = kpm_send_psp_params(cfd, rsp->rx_key.spi, rsp->rx_key.key,
+				  rsp->rx_key._present.key_len);
+	if (ret < 0)
+		err(3, "Can't send PSP params: %d\n", ret);
+	psp_rx_assoc_rsp_free(rsp);
+
+	psp = kpm_receive(cfd);
+	if (!kpm_good_req(psp, KPM_MSG_TYPE_PSP_PARAMS))
+		err(4, "Can't read PSP key back");
+
+	teq = psp_tx_assoc_req_alloc();
+	psp_tx_assoc_req_set_version(teq, 0);
+	psp_tx_assoc_req_set_sock_fd(teq, cfd);
+	psp_tx_assoc_req_set_tx_key_spi(teq, psp->spi);
+	psp_tx_assoc_req_set_tx_key_key(teq, psp->key, psp->len);
+
+	free(psp);
+
+	tsp = psp_tx_assoc(self->psp, teq);
+	psp_tx_assoc_req_free(teq);
+	if (!tsp)
+		err(5, "YNL PSP Tx assoc: %s\n", self->psp->err.msg);
+
+	psp_tx_assoc_rsp_free(tsp);
+
+	return 0;
+}
+
 static void session_new_conn(struct session_state *self, int fd)
 {
 	struct kpm_connection_id *id;
@@ -131,8 +189,15 @@ static void session_new_conn(struct session_state *self, int fd)
 		goto err_free;
 	}
 
-	if (kpm_reply_conn_id(fd, &id->hdr, conn->id, conn->cpu) < 0)
+	if (kpm_reply_conn_id(fd, &id->hdr, conn->id, conn->cpu, id->flags) < 0)
 		goto err_free;
+
+	if (id->flags & KPM_CONNECT_FLAG_PSP) {
+		if (psp_exchange_keys(self, fd)) {
+			warn("Failed PSP exchange");
+			goto err_free;
+		}
+	}
 
 	list_add(&self->connections, &conn->connections);
 	return;
@@ -252,7 +317,7 @@ server_msg_connect(struct session_state *self, struct kpm_header *hdr)
 		goto err_close;
 	}
 
-	ret = kpm_send_conn_id(cfd, 0, 0);
+	ret = kpm_send_conn_id(cfd, 0, 0, req->flags);
 	if (ret < 0) {
 		warn("Failed to send connection ID");
 		goto err_close;
@@ -297,6 +362,13 @@ server_msg_connect(struct session_state *self, struct kpm_header *hdr)
 			      id->id, id->cpu, remote_port) < 1) {
 		warn("Failed to reply");
 		goto err_free_id;
+	}
+
+	if (req->flags & KPM_CONNECT_FLAG_PSP) {
+		if (psp_exchange_keys(self, cfd)) {
+			warn("Failed PSP exchange");
+			goto err_free_id;
+		}
 	}
 
 	list_add(&self->connections, &conn->connections);
@@ -977,6 +1049,9 @@ static void server_session_loop(int fd)
 		list_del(&conn->connections);
 		free(conn);
 	}
+
+	if (self.psp)
+		ynl_sock_destroy(self.psp);
 }
 
 static NORETURN void server_session(int fd)

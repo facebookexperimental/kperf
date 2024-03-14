@@ -21,6 +21,7 @@ enum kpm_msg_type {
 	KPM_MSG_TYPE_DISCONNECT,
 	KPM_MSG_TYPE_CONNECTION_ID,
 	KPM_MSG_TYPE_TLS,
+	KPM_MSG_TYPE_PSP_PARAMS,
 	KPM_MSG_TYPE_MAX_PACING,
 	KPM_MSG_TYPE_TCP_CC,
 	KPM_MSG_TYPE_TEST,
@@ -83,11 +84,14 @@ struct kpm_pin_worker {
 	__u32 cpu;
 };
 
+#define KPM_CONNECT_FLAG_PSP	(1 << 0) /* inline PSP key xchg */
+
 struct kpm_connect {
 	struct kpm_header hdr;
 	socklen_t len;
 	struct sockaddr_in6 addr;
 	__u32 mss;
+	__u32 flags;
 };
 
 struct kpm_connect_reply {
@@ -103,6 +107,7 @@ struct kpm_connection_id {
 	struct kpm_header hdr;
 	__u32 id;
 	__u32 cpu;
+	__u32 flags;
 };
 
 struct kpm_max_pacing {
@@ -134,6 +139,13 @@ struct kpm_tls {
 	union {
 		struct tls12_crypto_info_aes_gcm_128 aes128;
 	} info;
+};
+
+struct kpm_psp_params {
+	struct kpm_header hdr;
+	__u32 spi;
+	__u32 len;
+	char key[64];
 };
 
 struct kpm_end_test {
@@ -243,11 +255,12 @@ int kpm_send(int fd, struct kpm_header *msg, size_t size,
 int kpm_send_empty(int fd, enum kpm_msg_type type);
 int kpm_send_u32(int fd, enum kpm_msg_type type, __u32 arg);
 
-int kpm_send_conn_id(int fd, __u32 id, __u32 cpu);
+int kpm_send_conn_id(int fd, __u32 id, __u32 cpu, __u32 flags);
 int kpm_send_connect(int fd, struct sockaddr_in6 *addr, socklen_t len,
-		     __u32 mss);
+		     __u32 mss, __u32 flags);
 int kpm_send_tls(int fd, __u32 conn_id, __u32 dir_mask,
 		 void *info, socklen_t len);
+int kpm_send_psp_params(int fd, __u32 spi, void *key, __u32 len);
 int kpm_send_max_pacing(int fd, __u32 id, __u32 max_pace);
 int kpm_send_tcp_cc(int fd, __u32 id, char *cc_name);
 int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu);
@@ -263,7 +276,8 @@ int kpm_reply_acceptor(int fd, struct kpm_header *hdr,
 int kpm_reply_connect(int fd, struct kpm_header *hdr,
 		      __u32 local_id, __u32 local_cpu, __u16 local_port,
 		      __u32 remote_id, __u32 remote_cpu, __u16 remote_port);
-int kpm_reply_conn_id(int fd, struct kpm_header *hdr, __u32 id, __u32 cpu);
+int kpm_reply_conn_id(int fd, struct kpm_header *hdr, __u32 id, __u32 cpu,
+		      __u32 flags);
 
 int kpm_xchg_hello(int fd, unsigned int *ncpus);
 
