@@ -36,6 +36,7 @@ static struct {
 	bool tls_rx;
 	bool tls_tx;
 	bool tls_nopad;
+	bool psp;
 	bool output_csv;
 	bool output_hdr;
 	bool xpin;
@@ -240,6 +241,8 @@ static const struct opt_table opts[] = {
 			"Enable TLS for Tx"),
 	OPT_WITHOUT_ARG("--tls-nopad", opt_set_bool, &opt.tls_nopad,
 			"Enable TLS no padding optimization for Rx"),
+	OPT_WITHOUT_ARG("--psp", opt_set_bool, &opt.psp,
+			"Enable PSP in both directions"),
 	OPT_WITH_ARG("--num-connections|-n <arg>",
 		     opt_set_uintval, opt_show_uintval,
 		     &opt.n_conns, "Number of connections"),
@@ -295,6 +298,7 @@ spawn_conn(int src, int dst, struct sockaddr_in6 *addr, socklen_t len)
 	struct kpm_connect_reply *conns;
 	struct kpm_connect_reply *id;
 	struct bim_state *bim;
+	__u32 conn_flags = 0;
 	struct bim_edge m;
 	unsigned int i;
 	int *seq;
@@ -314,9 +318,13 @@ spawn_conn(int src, int dst, struct sockaddr_in6 *addr, socklen_t len)
 	if (!bim)
 		goto err_free_seq;
 
+
+	if (opt.psp)
+		conn_flags |= KPM_CONNECT_FLAG_PSP;
+
 again:
 	for (i = 0; i < opt.n_conns; i++) {
-		seq[i] = kpm_send_connect(src, addr, len, opt.mss);
+		seq[i] = kpm_send_connect(src, addr, len, opt.mss, conn_flags);
 		if (seq[i] < 0)
 			err(7, "Failed to connect");
 	}
