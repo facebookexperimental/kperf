@@ -254,7 +254,7 @@ static const struct opt_table opts[] = {
 	OPT_WITHOUT_ARG("--quiet|-q", opt_dec_intval, &verbose,
 			"Quiet mode (can be specified more than once)"),
 	OPT_WITHOUT_ARG("--usage|--help|-h", opt_usage_and_exit,
-			"kpeft client",	"Show this help message"),
+			"kperf client",	"Show this help message"),
 	OPT_WITHOUT_ARG("--msg-trunc", opt_set_bool, &opt.msg_trunc, "Use MSG_TRUNC on receive"),
 	OPT_WITHOUT_ARG("--msg-zerocopy", opt_set_bool, &opt.msg_zerocopy, "Use MSG_ZEROCOPY on transmit"),
 	OPT_EARLY_WITHOUT_ARG("--devmem-rx", opt_set_bool, &opt.devmem_rx, "Use TCP Devmem on receive"),
@@ -483,13 +483,17 @@ show_cpu_stat(const char *pfx, struct kpm_test_results *result, unsigned int id)
 }
 
 static void
-dump_result(struct kpm_test_results *result, const char *dir,
+dump_result(struct kpm_test_results *result,
 	    struct kpm_connect_reply *conns, bool local)
 {
 	unsigned int end = 0, i, r;
 	int start = -1;
 
-	warnx("== %s", dir);
+	if (local)
+		warnx("== %s %s", "Source", opt.src);
+	else
+		warnx("== %s %s", "Target", opt.dst);
+
 	for (r = 0; r < opt.n_conns; r++)
 		warnx("  Tx%7.3lf Gbps (%llu bytes in %u usec)",
 		      (double)result->res[r].tx_bytes * 8 /
@@ -574,7 +578,7 @@ dump_result(struct kpm_test_results *result, const char *dir,
 }
 
 static void
-dump_result_machine(struct kpm_test_results *result, const char *dir,
+dump_result_machine(struct kpm_test_results *result,
 		    struct kpm_connect_reply *conns, bool local)
 {
 	struct kpm_test_result res = {};
@@ -984,9 +988,9 @@ int main(int argc, char *argv[])
 		warnx("Invalid result %d %d",
 		      result->hdr.type, result->hdr.len);
 	else if (opt.output_csv)
-		dump_result_machine(result, "Source", conns, true);
+		dump_result_machine(result, conns, true);
 	else
-		dump_result(result, "Source", conns, true);
+		dump_result(result, conns, true);
 	free(result);
 
 	/* Stop the test on both ends */
@@ -1005,9 +1009,9 @@ int main(int argc, char *argv[])
 		warnx("Invalid result %d %d",
 		      result->hdr.type, result->hdr.len);
 	else if (opt.output_csv)
-		dump_result_machine(result, "Source", conns, false);
+		dump_result_machine(result, conns, false);
 	else
-		dump_result(result, "Target", conns, false);
+		dump_result(result, conns, false);
 	free(result);
 
 out_id:
