@@ -107,6 +107,7 @@ session_find_test_by_id(struct session_state *self, unsigned int id)
 
 static void session_new_conn(struct session_state *self, int fd)
 {
+	struct kpm_connection_id *id;
 	struct connection *conn;
 	socklen_t len;
 
@@ -124,7 +125,13 @@ static void session_new_conn(struct session_state *self, int fd)
 		goto err_free;
 	}
 
-	if (kpm_send_conn_id(fd, conn->id, conn->cpu) < 0)
+	id = kpm_receive(fd);
+	if (!id) {
+		warnx("No connection ID");
+		goto err_free;
+	}
+
+	if (kpm_reply_conn_id(fd, &id->hdr, conn->id, conn->cpu) < 0)
 		goto err_free;
 
 	list_add(&self->connections, &conn->connections);
@@ -245,14 +252,19 @@ server_msg_connect(struct session_state *self, struct kpm_header *hdr)
 		goto err_close;
 	}
 
+	ret = kpm_send_conn_id(cfd, 0, 0);
+	if (ret < 0) {
+		warn("Failed to send connection ID");
+		goto err_close;
+	}
+
 	id = kpm_receive(cfd);
 	if (!id) {
 		warnx("No connection ID");
 		goto err_close;
 	}
 
-	if (id->hdr.type != KPM_MSG_TYPE_CONNECTION_ID ||
-	    id->hdr.len != sizeof(*id)) {
+	if (!kpm_good_reply(id, KPM_MSG_TYPE_CONNECTION_ID, ret)) {
 		warnx("Invalid connection ID %d %d", id->hdr.type, id->hdr.len);
 		goto err_free_id;
 	}
