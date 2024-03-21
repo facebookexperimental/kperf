@@ -134,7 +134,7 @@ static const struct opt_table opts[] = {
 	OPT_WITHOUT_ARG("--quiet|-q", opt_dec_intval, &verbose,
 			"Quiet mode (can be specified more than once)"),
 	OPT_WITHOUT_ARG("--usage|--help|-h", opt_usage_and_exit,
-			"kpeft client",	"Show this help message"),
+			"kperf client",	"Show this help message"),
 	OPT_ENDTABLE
 };
 
