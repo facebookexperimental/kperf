@@ -307,7 +307,7 @@ static int spawn_worker(int fd, int cpu, __u32 *wid)
 	}
 
 	if (!kpm_good_reply(ack, KPM_MSG_TYPE_PIN_WORKER, seq)) {
-		warnx("Invalid ack for pin %d %d", id->hdr.type, id->hdr.len);
+		warnx("Invalid ack for pin %d %d", ack->hdr.type, ack->hdr.len);
 		free(ack);
 		return 1;
 	}
