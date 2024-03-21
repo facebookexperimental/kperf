@@ -264,6 +264,16 @@ int kpm_reply_connect(int fd, struct kpm_header *hdr,
 	return kpm_reply(fd, &msg.hdr, sizeof(msg), hdr);
 }
 
+int kpm_reply_conn_id(int fd, struct kpm_header *hdr, __u32 id, __u32 cpu)
+{
+	struct kpm_connection_id msg = {};
+
+	msg.id = id;
+	msg.cpu = cpu;
+
+	return kpm_reply(fd, &msg.hdr, sizeof(msg), hdr);
+}
+
 int kpm_xchg_hello(int fd, unsigned int *ncpus)
 {
 	struct kpm_hello hello;
