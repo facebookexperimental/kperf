@@ -9,6 +9,10 @@ CFLAGS=-std=gnu99   -I$(CCAN_PATH)   -O2   -W -Wall -Wextra -Wno-unused-paramete
 CFLAGS += -I$(YNL_PATH)/include/
 CFLAGS += -I$(LIBURING_PATH)/src/include/
 
+ifeq ("$(DEBUG)","1")
+  CFLAGS += -g -fsanitize=address -fsanitize=leak -static-libasan
+endif
+
 LIBS=-lm -L$(CCAN_PATH) -pthread -lccan
 LIBS += -L$(YNL_PATH) -lynl
 LIBS += $(LIBURING_PATH)/src/liburing.a
