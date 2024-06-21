@@ -15,6 +15,7 @@
 #include <sys/epoll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/sysinfo.h>
 
 #include <ccan/array_size/array_size.h>
 #include <ccan/compiler/compiler.h>
@@ -979,6 +980,12 @@ struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen)
 {
 	struct server_session *ses;
+
+	if (get_nprocs() > KPERF_MAX_CPUS) {
+		warnx("Too many CPUs in the system: %d, proto has max of %d",
+		      get_nprocs(), KPERF_MAX_CPUS);
+		return NULL;
+	}
 
 	ses = malloc(sizeof(*ses));
 	if (!ses) {

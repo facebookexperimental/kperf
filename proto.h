@@ -10,6 +10,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#define KPERF_MAX_CPUS	1024
+
 enum kpm_msg_type {
 	KPM_MSG_TYPE_ERROR = 1,
 	KPM_MSG_TYPE_ECHO,
@@ -185,7 +187,7 @@ struct kpm_test_results {
 		__u16 iowait;
 		__u16 irq;
 		__u16 sirq;
-	} cpu_load[256];
+	} cpu_load[KPERF_MAX_CPUS];
 	struct kpm_test_result {
 		__u32 connection_id;
 		__u32 worker_id;
