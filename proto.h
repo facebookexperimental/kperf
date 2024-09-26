@@ -165,6 +165,7 @@ struct kpm_test {
 		__u32 read_size;
 		__u32 write_size;
 		__u32 msg_trunc:1;
+		__u32 msg_zerocopy:1;
 		union kpm_test_arg {
 			struct {
 				__u32 req_size;
