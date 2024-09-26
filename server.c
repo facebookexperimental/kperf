@@ -19,8 +19,9 @@
 #include <ccan/opt/opt.h>
 
 #include "server.h"
+#include "proto_dbg.h"
 
-int verbose;
+int verbose = 3;
 
 static struct {
 	char *service;
