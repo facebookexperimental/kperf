@@ -529,6 +529,7 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 static void
 worker_handle_recv(struct worker_state *self, struct connection *conn)
 {
+	int flags = conn->spec->msg_trunc ? MSG_TRUNC : 0;
 	unsigned int rep = 10;
 	unsigned char *buf;
 
@@ -544,7 +545,7 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 		ssize_t n;
 
 		chunk = min_t(size_t, conn->read_size, conn->to_recv);
-		n = recv(conn->fd, buf, chunk, MSG_DONTWAIT);
+		n = recv(conn->fd, buf, chunk, MSG_DONTWAIT | flags);
 		if (n == 0) {
 			warnx("zero recv");
 			worker_kill_conn(self, conn);
@@ -558,7 +559,7 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 			break;
 		}
 
-		if (memcmp(buf, src, n))
+		if (!conn->spec->msg_trunc && memcmp(buf, src, n))
 			warnx("Data corruption %d %d %ld %lld %lld %d",
 			      *buf, *(char *)src, n,
 			      conn->tot_recv % PATTERN_PERIOD,

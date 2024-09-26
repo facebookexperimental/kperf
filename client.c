@@ -22,6 +22,7 @@
 int verbose = 3;
 
 static struct {
+	bool msg_trunc;
 	bool tls;
 	bool tls_rx;
 	bool tls_tx;
@@ -135,6 +136,7 @@ static const struct opt_table opts[] = {
 			"Quiet mode (can be specified more than once)"),
 	OPT_WITHOUT_ARG("--usage|--help|-h", opt_usage_and_exit,
 			"kpeft client",	"Show this help message"),
+	OPT_WITHOUT_ARG("--msg-trunc", opt_set_bool, &opt.msg_trunc, "Use MSG_TRUNC on receive"),
 	OPT_ENDTABLE
 };
 
@@ -673,6 +675,7 @@ int main(int argc, char *argv[])
 		test->specs[i].worker_id = dst_wrk_id[i];
 		test->specs[i].read_size = opt.read_size;
 		test->specs[i].write_size = opt.write_size;
+		test->specs[i].msg_trunc = opt.msg_trunc;
 		if (opt.req_size == ~0U) {
 			test->specs[i].type = KPM_TEST_TYPE_STREAM;
 		} else {

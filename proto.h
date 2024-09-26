@@ -164,6 +164,7 @@ struct kpm_test {
 		enum kpm_test_type type;
 		__u32 read_size;
 		__u32 write_size;
+		__u32 msg_trunc:1;
 		union kpm_test_arg {
 			struct {
 				__u32 req_size;
