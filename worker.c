@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <linux/errqueue.h>
 #include <linux/tcp.h>
 #include <sys/epoll.h>
 #include <sys/sysinfo.h>
@@ -44,6 +45,7 @@ struct connection {
 	unsigned int read_size;
 	unsigned int write_size;
 	__u64 to_send;
+	__u64 to_send_comp;
 	__u64 to_recv;
 	__u64 tot_sent;
 	__u64 tot_recv;
@@ -238,6 +240,7 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 {
 	struct kpm_test *req = (void *)hdr;
 	unsigned int i;
+	int zc;
 
 	if (self->test) {
 		warn("Already running a test");
@@ -306,6 +309,13 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 			conn->to_send = len;
 		else
 			conn->to_recv = len;
+
+		zc = !!conn->spec->msg_zerocopy;
+		if (setsockopt(conn->fd, SOL_SOCKET, SO_ZEROCOPY, &zc, sizeof(zc))) {
+			warnx("Failed to set SO_ZEROCOPY");
+			self->quit = 1;
+			return;
+		}
 
 		ev.events = EPOLLIN | EPOLLOUT;
 		ev.data.fd = conn->fd;
@@ -481,10 +491,77 @@ worker_recv_finished(struct worker_state *self, struct connection *conn)
 }
 
 static void
+worker_handle_completions(struct worker_state *self, struct connection *conn,
+			  unsigned int events)
+{
+	struct sock_extended_err *serr;
+	struct msghdr msg = {};
+	char control[64] = {};
+	struct cmsghdr *cm;
+	int ret, n;
+
+	msg.msg_control = control;
+	msg.msg_controllen = sizeof(control);
+
+	ret = recvmsg(conn->fd, &msg, MSG_ERRQUEUE);
+	if (ret < 0) {
+		if (errno == EAGAIN)
+			return;
+		warn("failed to clean completions");
+		goto kill_conn;
+	}
+
+	if (msg.msg_flags & MSG_CTRUNC) {
+		warnx("failed to clean completions: truncated cmsg");
+		goto kill_conn;
+	}
+
+	cm = CMSG_FIRSTHDR(&msg);
+	if (!cm) {
+		warnx("failed to clean completions: no cmsg");
+		goto kill_conn;
+	}
+
+	if (cm->cmsg_level != SOL_IP && cm->cmsg_level != SOL_IPV6) {
+		warnx("failed to clean completions: wrong level %d",
+		      cm->cmsg_level);
+		goto kill_conn;
+	}
+
+	if (cm->cmsg_type != IP_RECVERR && cm->cmsg_type != IPV6_RECVERR) {
+		warnx("failed to clean completions: wrong type %d",
+		      cm->cmsg_type);
+		goto kill_conn;
+	}
+
+	serr = (void *)CMSG_DATA(cm);
+	if (serr->ee_origin != SO_EE_ORIGIN_ZEROCOPY) {
+		warnx("failed to clean completions: wrong origin %d",
+		      serr->ee_origin);
+		goto kill_conn;
+	}
+	if (serr->ee_errno) {
+		warnx("failed to clean completions: error %d",
+		      serr->ee_errno);
+		goto kill_conn;
+	}
+	n = serr->ee_data - serr->ee_info + 1;
+	conn->to_send_comp -= n;
+	kpm_dbg("send complete (%d..%d) %d\n",
+		serr->ee_data, serr->ee_info + 1, conn->to_send_comp);
+
+	return;
+
+kill_conn:
+	worker_kill_conn(self, conn);
+}
+
+static void
 worker_handle_send(struct worker_state *self, struct connection *conn,
 		   unsigned int events)
 {
 	unsigned int rep = max_t(int, 10, conn->to_send / conn->write_size + 1);
+	int flags = conn->spec->msg_zerocopy ? MSG_ZEROCOPY : 0;
 
 	while (rep--) {
 		void *src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
@@ -492,7 +569,7 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 		ssize_t n;
 
 		chunk = min_t(size_t, conn->write_size, conn->to_send);
-		n = send(conn->fd, src, chunk, MSG_DONTWAIT);
+		n = send(conn->fd, src, chunk, MSG_DONTWAIT | flags);
 		if (n == 0) {
 			warnx("zero send chunk:%zd to_send:%lld to_recv:%lld",
 			      chunk, conn->to_send, conn->to_recv);
@@ -512,8 +589,13 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 
 		conn->to_send -= n;
 		conn->tot_sent += n;
+		if (conn->spec->msg_zerocopy) {
+			conn->to_send_comp += 1;
+			kpm_dbg("queued send completion, total %d",
+				conn->to_send_comp);
+		}
 
-		if (!conn->to_send) {
+		if (!conn->to_send && !conn->to_send_comp) {
 			worker_send_finished(self, conn, events);
 			break;
 		}
@@ -594,7 +676,7 @@ worker_handle_conn(struct worker_state *self, int fd, unsigned int events)
 	if (events & EPOLLOUT) {
 		if (conn->to_send)
 			worker_handle_send(self, conn, events);
-		else
+		else if (!conn->to_send_comp)
 			worker_send_disarm(self, conn, events);
 	}
 	if (events & EPOLLIN) {
@@ -605,8 +687,10 @@ worker_handle_conn(struct worker_state *self, int fd, unsigned int events)
 			warnd_unexpected_pi = 1;
 		}
 	}
+	if (events & EPOLLERR)
+		worker_handle_completions(self, conn, events);
 
-	if (!(events & (EPOLLOUT | EPOLLIN)))
+	if (!(events & (EPOLLOUT | EPOLLIN | EPOLLERR)))
 		warnx("Connection has nothing to do %x", events);
 }
 
