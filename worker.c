@@ -195,7 +195,7 @@ static void worker_report_test(struct worker_state *self)
 		data->snd_wnd	= info.tcpi_snd_wnd;
 		data->snd_cwnd	= info.tcpi_snd_cwnd;
 
-		if (verbose > 1)
+		if (verbose > 2)
 			print_tcp_info(&info);
 
 		memcpy(data->lat_hist, conn->rr.hist, sizeof(data->lat_hist));
@@ -245,7 +245,7 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 		return;
 	}
 
-	kpm_info("start test %s", req->active ? "act" : "psv");
+	kpm_dbg("start test %s", req->active ? "act" : "psv");
 
 	self->test = malloc(hdr->len);
 	memcpy(self->test, req, hdr->len);
@@ -667,6 +667,6 @@ void NORETURN pworker_main(int fd)
 		}
 	}
 
-	kpm_info("exiting!");
+	kpm_dbg("exiting!");
 	exit(0);
 }

@@ -15,7 +15,7 @@ extern int verbose;
 	({								\
 		struct kpm_header *_hdr = (hdr);			\
 									\
-		if (verbose)						\
+		if (verbose >= 4)						\
 			fprintf(stderr, "D%s %s%s%s T%d (seq:%d, len:%d)\n", \
 				pfx, __FILE__,				\
 				strlen(msg) ? " " : "", msg,		\
