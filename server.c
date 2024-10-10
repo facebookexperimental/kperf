@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <arpa/inet.h>
 
 #include <ccan/err/err.h>
 #include <ccan/daemonize/daemonize.h>
@@ -24,6 +25,7 @@
 int verbose = 3;
 
 static struct {
+	char *addr;
 	char *service;
 	char *pid_file;
 	bool kill;
@@ -35,6 +37,8 @@ static struct {
 };
 
 static const struct opt_table opts[] = {
+	OPT_WITH_ARG("--addr|-a <arg>", opt_set_charp, opt_show_charp,
+		     &opt.addr, "Bind to specific control address"),
  	OPT_WITH_ARG("--port|-p <arg>", opt_set_charp, opt_show_charp,
 		     &opt.service, "Set control port/service to listen on"),
 	OPT_WITHOUT_ARG("--no-daemon", opt_set_invbool, &opt.server,
@@ -149,6 +153,55 @@ static void server_daemonize(void)
 	close(fd);
 }
 
+/* same as net_server_lookup but accepts the node argument */
+static struct addrinfo *net_server_lookup_node(const char *node,
+					       const char *service,
+					       int family,
+					       int socktype)
+{
+	struct addrinfo *res, hints;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = family;
+	hints.ai_socktype = socktype;
+	hints.ai_flags = AI_PASSIVE;
+	hints.ai_protocol = 0;
+
+	if (getaddrinfo(node, service, &hints, &res) != 0)
+		return NULL;
+
+	return res;
+}
+
+static void log_address(const char *format, struct sockaddr_in6 *sin6)
+{
+	struct sockaddr_in *sin = (void *)sin6;
+	char buf[256];
+
+	if (sin6->sin6_family == AF_INET6)
+		inet_ntop(AF_INET6, &sin6->sin6_addr, buf, sizeof(buf));
+	else
+		inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf));
+
+	kpm_info(format, buf);
+}
+
+static void print_listener(int *fds, int num_fds)
+{
+	struct sockaddr_in6 sin6;
+	socklen_t sa_len;
+	int ret;
+	int i;
+
+	for (i = 0; i < num_fds; i++) {
+		sa_len = sizeof(sin6);
+		ret = getsockname(fds[i], (struct sockaddr *)&sin6, &sa_len);
+		if (ret != 0)
+			err(1, "Failed to look up address for fd %d", fds[i]);
+		log_address("Bound to %s", &sin6);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int fds[2], i, num_fds, max_fd;
@@ -168,7 +221,7 @@ int main(int argc, char *argv[])
 	if (opt.server)
 		server_daemonize();
 
-	addr = net_server_lookup(opt.service, AF_UNSPEC, SOCK_STREAM);
+	addr = net_server_lookup_node(opt.addr, opt.service, AF_UNSPEC, SOCK_STREAM);
 	if (!addr)
 		errx(1, "Failed to look up service to bind to");
 
@@ -176,6 +229,8 @@ int main(int argc, char *argv[])
 	freeaddrinfo(addr);
 	if (num_fds < 1)
 		err(1, "Failed to listen");
+	if (opt.addr)
+		print_listener(fds, num_fds);
 
 	max_fd = num_fds == 1 || fds[0] > fds[1] ? fds[0] : fds[1];
 
@@ -219,6 +274,8 @@ int main(int argc, char *argv[])
 			continue;
 		}
 
+		if (opt.addr)
+			log_address("Accepted %s", &sockaddr);
 		ses = server_session_spawn(cfd, &sockaddr, &addrlen);
 		if (ses)
 			server_session_add(ses);
