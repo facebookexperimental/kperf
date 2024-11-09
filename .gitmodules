@@ -1,3 +1,6 @@
 [submodule "ccan"]
 	path = ccan
 	url = https://github.com/rustyrussell/ccan.git
+[submodule "ynl-c"]
+	path = ynl-c
+	url = https://github.com/linux-netdev/ynl-c.git
