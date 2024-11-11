@@ -49,6 +49,7 @@ struct connection {
 	__u64 to_recv;
 	__u64 tot_sent;
 	__u64 tot_recv;
+	unsigned char *rxbuf;
 	struct kpm_test_spec *spec;
 	struct tcp_info init_info;
 	union {
@@ -89,6 +90,7 @@ worker_kill_conn(struct worker_state *self, struct connection *conn)
 		warn("Failed to del poll out");
 	close(conn->fd);
 	list_del(&conn->connections);
+	free(conn->rxbuf);
 	free(conn->rr.log);
 	free(conn);
 }
@@ -284,6 +286,13 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 
 		conn->read_size = conn->spec->read_size;
 		conn->write_size = conn->spec->write_size;
+
+		conn->rxbuf = malloc(conn->read_size);
+		if (!conn->rxbuf) {
+			warnx("No memory");
+			self->quit = 1;
+			return;
+		}
 
 		if (!conn->read_size || conn->read_size > KPM_MAX_OP_CHUNK ||
 		    !conn->write_size || conn->write_size > KPM_MAX_OP_CHUNK) {
@@ -613,13 +622,6 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 {
 	int flags = conn->spec->msg_trunc ? MSG_TRUNC : 0;
 	unsigned int rep = 10;
-	unsigned char *buf;
-
-	buf = malloc(conn->read_size);
-	if (!buf) {
-		warnx("No memory");
-		return;
-	}
 
 	while (rep--) {
 		void *src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
@@ -627,7 +629,7 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 		ssize_t n;
 
 		chunk = min_t(size_t, conn->read_size, conn->to_recv);
-		n = recv(conn->fd, buf, chunk, MSG_DONTWAIT | flags);
+		n = recv(conn->fd, conn->rxbuf, chunk, MSG_DONTWAIT | flags);
 		if (n == 0) {
 			warnx("zero recv");
 			worker_kill_conn(self, conn);
@@ -641,9 +643,9 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 			break;
 		}
 
-		if (!conn->spec->msg_trunc && memcmp(buf, src, n))
+		if (!conn->spec->msg_trunc && memcmp(conn->rxbuf, src, n))
 			warnx("Data corruption %d %d %ld %lld %lld %d",
-			      *buf, *(char *)src, n,
+			      *conn->rxbuf, *(char *)src, n,
 			      conn->tot_recv % PATTERN_PERIOD,
 			      conn->tot_recv, rep);
 
@@ -662,7 +664,6 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 			break;
 	}
 
-	free(buf);
 }
 
 static void
