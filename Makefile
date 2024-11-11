@@ -15,7 +15,7 @@ include $(wildcard *.d)
 all: server client units
 units: bipartite_match cpu_stat
 
-server: $(CCAN_PATH)/libccan.a $(YNL_PATH)/libynl.a server.o server_session.o proto.o worker.o cpu_stat.o tcp.o
+server: $(CCAN_PATH)/libccan.a $(YNL_PATH)/libynl.a server.o server_session.o proto.o worker.o devmem.o cpu_stat.o tcp.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
 client: $(CCAN_PATH)/libccan.a client.o proto.o bipartite_match.o
