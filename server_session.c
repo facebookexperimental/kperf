@@ -41,6 +41,7 @@ struct session_state {
 	struct list_head connections;
 	struct list_head pworkers;
 	struct list_head tests;
+	struct session_state_devmem devmem;
 };
 
 struct connection {
@@ -501,12 +502,22 @@ static void
 server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 {
 	struct kpm_mode *req;
+	int ret;
 
 	if (hdr->len < sizeof(*req)) {
 		warn("Invalid request in %s", __func__);
 		goto err_quit;
 	}
 	req = (void *)hdr;
+
+	if (self->tcp_sock && req->rx_mode == KPM_RX_MODE_DEVMEM) {
+		ret = devmem_setup(&self->devmem, self->tcp_sock, req->udmabuf_size_mb);
+		if (ret < 0) {
+			warn("Failed to setup devmem");
+			self->quit = 1;
+			return;
+		}
+	}
 
 	self->rx_mode = req->rx_mode;
 	self->tx_mode = req->tx_mode;
@@ -996,6 +1007,8 @@ static void server_session_loop(int fd)
 		list_del(&conn->connections);
 		free(conn);
 	}
+	if (self.tcp_sock && self.rx_mode == KPM_RX_MODE_DEVMEM)
+		devmem_teardown(&self.devmem);
 }
 
 static NORETURN void server_session(int fd)

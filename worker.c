@@ -52,6 +52,7 @@ struct connection {
 	__u64 tot_sent;
 	__u64 tot_recv;
 	unsigned char *rxbuf;
+	struct connection_devmem devmem;
 	struct kpm_test_spec *spec;
 	struct tcp_info init_info;
 	union {
@@ -90,6 +91,8 @@ worker_kill_conn(struct worker_state *self, struct connection *conn)
 	ev.data.fd = conn->fd;
 	if (epoll_ctl(self->epollfd, EPOLL_CTL_DEL, conn->fd, &ev) < 0)
 		warn("Failed to del poll out");
+	if (self->rx_mode == KPM_RX_MODE_DEVMEM)
+		(void)devmem_release_tokens(conn->fd, &conn->devmem);
 	close(conn->fd);
 	list_del(&conn->connections);
 	free(conn->rxbuf);
@@ -651,7 +654,10 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 		ssize_t n;
 
 		chunk = min_t(size_t, conn->read_size, conn->to_recv);
-		n = worker_handle_regular_recv(self, conn, chunk, rep);
+		if (self->rx_mode == KPM_RX_MODE_DEVMEM)
+			n = devmem_recv(conn->fd, &conn->devmem, conn->rxbuf, chunk, rep);
+		else
+			n = worker_handle_regular_recv(self, conn, chunk, rep);
 		if (n == 0) {
 			warnx("zero recv");
 			worker_kill_conn(self, conn);

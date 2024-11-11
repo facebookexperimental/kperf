@@ -180,12 +180,14 @@ int kpm_send_tcp_cc(int fd, __u32 id, char *cc_name)
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_TCP_CC);
 }
 
-int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode)
+int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
+		  __u32 udmabuf_size_mb)
 {
 	struct kpm_mode msg = {};
 
 	msg.rx_mode = rx_mode;
 	msg.tx_mode = tx_mode;
+	msg.udmabuf_size_mb = udmabuf_size_mb;
 
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_MODE);
 }
@@ -454,12 +456,13 @@ kpm_req_tcp_cc(int fd, __u32 conn_id, char *cc_name)
 }
 
 int
-kpm_req_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode)
+kpm_req_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
+	     __u32 udmabuf_size_mb)
 {
 	struct kpm_empty *repl;
 	int id;
 
-	id = kpm_send_mode(fd, rx_mode, tx_mode);
+	id = kpm_send_mode(fd, rx_mode, tx_mode, udmabuf_size_mb);
 	if (id < 0) {
 		warnx("Failed to request mode");
 		return id;
