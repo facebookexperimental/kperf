@@ -10,6 +10,8 @@
 #include <ccan/compiler/compiler.h>
 #include <ccan/list/list.h>
 
+#include "proto.h"
+
 struct server_session {
 	int cfd;
 	pid_t pid;
@@ -19,6 +21,6 @@ struct server_session {
 struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
-void NORETURN pworker_main(int fd);
+void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode);
 
 #endif /* SERVER_H */

@@ -33,6 +33,8 @@ struct session_state {
 	int epollfd;
 	int quit;
 	int tcp_sock;
+	enum kpm_rx_mode rx_mode;
+	enum kpm_tx_mode tx_mode;
 	unsigned int connection_ids;
 	unsigned int worker_ids;
 	unsigned int test_ids;
@@ -496,6 +498,31 @@ err_quit:
 }
 
 static void
+server_msg_mode(struct session_state *self, struct kpm_header *hdr)
+{
+	struct kpm_mode *req;
+
+	if (hdr->len < sizeof(*req)) {
+		warn("Invalid request in %s", __func__);
+		goto err_quit;
+	}
+	req = (void *)hdr;
+
+	self->rx_mode = req->rx_mode;
+	self->tx_mode = req->tx_mode;
+
+	if (kpm_reply_empty(self->main_sock, hdr) < 1) {
+		warnx("Reply failed");
+		goto err_quit;
+	}
+
+	return;
+
+err_quit:
+	self->quit = 1;
+}
+
+static void
 server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 {
 	struct epoll_event ev = {};
@@ -519,7 +546,7 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 	}
 	if (!pwrk->pid) {
 		close(p[0]);
-		pworker_main(p[1]);
+		pworker_main(p[1], self->rx_mode, self->tx_mode);
 		exit(1);
 	}
 
@@ -787,6 +814,9 @@ static void session_handle_main_sock(struct session_state *self)
 		break;
 	case KPM_MSG_TYPE_TCP_CC:
 		server_msg_tcp_cc(self, hdr);
+		break;
+	case KPM_MSG_TYPE_MODE:
+		server_msg_mode(self, hdr);
 		break;
 	case KPM_MSG_TYPE_SPAWN_PWORKER:
 		server_msg_spawn_pworker(self, hdr);

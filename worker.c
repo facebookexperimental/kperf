@@ -28,6 +28,8 @@
 /* Main worker state AKA self */
 struct worker_state {
 	int main_sock;
+	enum kpm_rx_mode rx_mode;
+	enum kpm_tx_mode tx_mode;
 	int epollfd;
 	unsigned int id;
 	int quit;
@@ -319,7 +321,7 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 		else
 			conn->to_recv = len;
 
-		zc = !!conn->spec->msg_zerocopy;
+		zc = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY;
 		if (setsockopt(conn->fd, SOL_SOCKET, SO_ZEROCOPY, &zc, sizeof(zc))) {
 			warnx("Failed to set SO_ZEROCOPY");
 			self->quit = 1;
@@ -570,7 +572,8 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 		   unsigned int events)
 {
 	unsigned int rep = max_t(int, 10, conn->to_send / conn->write_size + 1);
-	int flags = conn->spec->msg_zerocopy ? MSG_ZEROCOPY : 0;
+	bool msg_zerocopy = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY;
+	int flags = msg_zerocopy ? MSG_ZEROCOPY : 0;
 
 	while (rep--) {
 		void *src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
@@ -598,7 +601,7 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 
 		conn->to_send -= n;
 		conn->tot_sent += n;
-		if (conn->spec->msg_zerocopy) {
+		if (msg_zerocopy) {
 			conn->to_send_comp += 1;
 			kpm_dbg("queued send completion, total %d",
 				conn->to_send_comp);
@@ -619,13 +622,14 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 
 static ssize_t worker_handle_regular_recv(struct worker_state *self, struct connection *conn, size_t chunk, int rep)
 {
+	bool msg_trunc = self->rx_mode == KPM_RX_MODE_SOCKET_TRUNC;
 	void *src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
-	int flags = conn->spec->msg_trunc ? MSG_TRUNC : 0;
+	int flags = msg_trunc ? MSG_TRUNC : 0;
 	ssize_t n;
 
 	n = recv(conn->fd, conn->rxbuf, chunk, MSG_DONTWAIT | flags);
 
-	if (n <= 0 || conn->spec->msg_trunc)
+	if (n <= 0 || msg_trunc)
 		return n;
 
 	if (memcmp(conn->rxbuf, src, n))
@@ -709,9 +713,13 @@ worker_handle_conn(struct worker_state *self, int fd, unsigned int events)
 
 /* == Main loop == */
 
-void NORETURN pworker_main(int fd)
+void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode)
 {
-	struct worker_state self = { .main_sock = fd, };
+	struct worker_state self = {
+		.main_sock = fd,
+		.rx_mode = rx_mode,
+		.tx_mode = tx_mode,
+	};
 	struct epoll_event ev, events[32];
 	unsigned char j;
 	int i, nfds;

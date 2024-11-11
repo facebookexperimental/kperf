@@ -180,6 +180,16 @@ int kpm_send_tcp_cc(int fd, __u32 id, char *cc_name)
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_TCP_CC);
 }
 
+int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode)
+{
+	struct kpm_mode msg = {};
+
+	msg.rx_mode = rx_mode;
+	msg.tx_mode = tx_mode;
+
+	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_MODE);
+}
+
 int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu)
 {
 	struct kpm_pin_worker msg;
@@ -435,6 +445,34 @@ kpm_req_tcp_cc(int fd, __u32 conn_id, char *cc_name)
 
 	if (!kpm_good_reply(repl, KPM_MSG_TYPE_TCP_CC, id)) {
 		warnx("Failed to request TCP cong control - bad reply");
+		free(repl);
+		return -1;
+	}
+
+	free(repl);
+	return 0;
+}
+
+int
+kpm_req_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode)
+{
+	struct kpm_empty *repl;
+	int id;
+
+	id = kpm_send_mode(fd, rx_mode, tx_mode);
+	if (id < 0) {
+		warnx("Failed to request mode");
+		return id;
+	}
+
+	repl = kpm_receive(fd);
+	if (!repl) {
+		warnx("Failed to request mode - no response");
+		return -1;
+	}
+
+	if (!kpm_good_reply(repl, KPM_MSG_TYPE_MODE, id)) {
+		warnx("Failed to request mode - bad reply");
 		free(repl);
 		return -1;
 	}
