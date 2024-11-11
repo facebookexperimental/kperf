@@ -25,6 +25,7 @@ enum kpm_msg_type {
 	KPM_MSG_TYPE_TLS,
 	KPM_MSG_TYPE_MAX_PACING,
 	KPM_MSG_TYPE_TCP_CC,
+	KPM_MSG_TYPE_MODE,
 	KPM_MSG_TYPE_TEST,
 	KPM_MSG_TYPE_TEST_RESULT,
 	KPM_MSG_TYPE_END_TEST,
@@ -121,6 +122,22 @@ struct kpm_tcp_cc {
 	char cc_name[KPM_CC_NAME_LEN];
 };
 
+enum kpm_rx_mode {
+	KPM_RX_MODE_SOCKET,
+	KPM_RX_MODE_SOCKET_TRUNC,
+};
+
+enum kpm_tx_mode {
+	KPM_TX_MODE_SOCKET,
+	KPM_TX_MODE_SOCKET_ZEROCOPY,
+};
+
+struct kpm_mode {
+	struct kpm_header hdr;
+	enum kpm_rx_mode rx_mode;
+	enum kpm_tx_mode tx_mode;
+};
+
 enum kpm_tls_mask {
 	KPM_TLS_ULP = 1,
 	KPM_TLS_TX = 2,
@@ -164,8 +181,6 @@ struct kpm_test {
 		enum kpm_test_type type;
 		__u32 read_size;
 		__u32 write_size;
-		__u32 msg_trunc:1;
-		__u32 msg_zerocopy:1;
 		union kpm_test_arg {
 			struct {
 				__u32 req_size;
@@ -254,6 +269,7 @@ int kpm_send_tls(int fd, __u32 conn_id, __u32 dir_mask,
 		 void *info, socklen_t len);
 int kpm_send_max_pacing(int fd, __u32 id, __u32 max_pace);
 int kpm_send_tcp_cc(int fd, __u32 id, char *cc_name);
+int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode);
 int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu);
 
 void kpm_reply_error(int fd, struct kpm_header *hdr, __u16 error);
@@ -276,6 +292,7 @@ int kpm_req_tls(int fd, __u32 conn_id, __u32 dir_mask,
 		void *info, socklen_t len);
 int kpm_req_pacing(int fd, __u32 conn_id, __u32 max_pace);
 int kpm_req_tcp_cc(int fd, __u32 conn_id, char *cc_name);
+int kpm_req_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode);
 int kpm_req_disconnect(int fd, __u32 connection_id);
 
 #endif /* PROTO_H */

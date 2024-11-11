@@ -532,6 +532,8 @@ dump_result_machine(struct kpm_test_results *result, const char *dir,
 
 int main(int argc, char *argv[])
 {
+	enum kpm_rx_mode rx_mode = KPM_RX_MODE_SOCKET;
+	enum kpm_tx_mode tx_mode = KPM_TX_MODE_SOCKET;
 	unsigned int src_ncpus, dst_ncpus;
 	struct __kpm_generic_u32 *ack_id;
 	__u32 *src_wrk_cpu, *dst_wrk_cpu;
@@ -607,6 +609,22 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
+	if (opt.msg_trunc)
+		rx_mode = KPM_RX_MODE_SOCKET_TRUNC;
+
+	if (opt.msg_zerocopy)
+		tx_mode = KPM_TX_MODE_SOCKET_ZEROCOPY;
+
+	if (kpm_req_mode(dst, rx_mode, tx_mode) < 0) {
+		warnx("Failed setup destination mode");
+		goto out;
+	}
+
+	if (kpm_req_mode(src, rx_mode, tx_mode) < 0) {
+		warnx("Failed setup source mode");
+		goto out;
+	}
+
 	conns = spawn_conn(src, dst, &conn_addr, len);
 	if (!conns)
 		goto out;
@@ -677,8 +695,6 @@ int main(int argc, char *argv[])
 		test->specs[i].worker_id = dst_wrk_id[i];
 		test->specs[i].read_size = opt.read_size;
 		test->specs[i].write_size = opt.write_size;
-		test->specs[i].msg_trunc = opt.msg_trunc;
-		test->specs[i].msg_zerocopy = opt.msg_zerocopy;
 		if (opt.req_size == ~0U) {
 			test->specs[i].type = KPM_TEST_TYPE_STREAM;
 		} else {
