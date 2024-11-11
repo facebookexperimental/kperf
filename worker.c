@@ -617,19 +617,37 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 	}
 }
 
+static ssize_t worker_handle_regular_recv(struct worker_state *self, struct connection *conn, size_t chunk, int rep)
+{
+	void *src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
+	int flags = conn->spec->msg_trunc ? MSG_TRUNC : 0;
+	ssize_t n;
+
+	n = recv(conn->fd, conn->rxbuf, chunk, MSG_DONTWAIT | flags);
+
+	if (n <= 0 || conn->spec->msg_trunc)
+		return n;
+
+	if (memcmp(conn->rxbuf, src, n))
+		warnx("Data corruption %d %d %ld %lld %lld %d",
+		      *conn->rxbuf, *(char *)src, n,
+		      conn->tot_recv % PATTERN_PERIOD,
+		      conn->tot_recv, rep);
+
+	return n;
+}
+
 static void
 worker_handle_recv(struct worker_state *self, struct connection *conn)
 {
-	int flags = conn->spec->msg_trunc ? MSG_TRUNC : 0;
 	unsigned int rep = 10;
 
 	while (rep--) {
-		void *src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
 		size_t chunk;
 		ssize_t n;
 
 		chunk = min_t(size_t, conn->read_size, conn->to_recv);
-		n = recv(conn->fd, conn->rxbuf, chunk, MSG_DONTWAIT | flags);
+		n = worker_handle_regular_recv(self, conn, chunk, rep);
 		if (n == 0) {
 			warnx("zero recv");
 			worker_kill_conn(self, conn);
@@ -642,12 +660,6 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 			worker_kill_conn(self, conn);
 			break;
 		}
-
-		if (!conn->spec->msg_trunc && memcmp(conn->rxbuf, src, n))
-			warnx("Data corruption %d %d %ld %lld %lld %d",
-			      *conn->rxbuf, *(char *)src, n,
-			      conn->tot_recv % PATTERN_PERIOD,
-			      conn->tot_recv, rep);
 
 		conn->to_recv -= n;
 		conn->tot_recv += n;
