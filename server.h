@@ -55,6 +55,7 @@ struct session_state_devmem {
 	int dmabuf_fd;
 	int udmabuf_devfd;
 	int udmabuf_memfd;
+	int rss_context;
 	bool udmabuf_valid;
 };
 
@@ -64,7 +65,7 @@ server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode);
 
 int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t udmabuf_size);
+		 size_t udmabuf_size, int num_queues);
 int devmem_teardown(struct session_state_devmem *devmem);
 int devmem_release_tokens(int fd, struct connection_devmem *conn);
 ssize_t devmem_recv(int fd, struct connection_devmem *conn,

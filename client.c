@@ -53,6 +53,7 @@ static struct {
 	unsigned int max_pace;
 	char *tcp_cong_ctrl;
 	unsigned int udmabuf_size_mb;
+	unsigned int num_rx_queues;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
 	.src = "localhost",
@@ -70,6 +71,7 @@ static struct {
 	.n_conns = 1,
 	/* 128M is enough to drive one queue at 200G */
 	.udmabuf_size_mb = 128,
+	.num_rx_queues = 1,
 };
 
 #define dbg(fmt...) while (0) { warnx(fmt); }
@@ -146,6 +148,8 @@ static const struct opt_table opts[] = {
 	OPT_WITHOUT_ARG("--devmem-rx", opt_set_bool, &opt.devmem_rx, "Use TCP Devmem on receive"),
 	OPT_WITH_ARG("--udmabuf-size-mb <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.udmabuf_size_mb, "Size of RX udmabuf for TCP Devmem mode"),
+	OPT_WITH_ARG("--num-rx-queues <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.num_rx_queues, "Number of RX queues for TCP Devmem mode"),
 	OPT_ENDTABLE
 };
 
@@ -627,12 +631,13 @@ int main(int argc, char *argv[])
 	if (opt.msg_zerocopy)
 		tx_mode = KPM_TX_MODE_SOCKET_ZEROCOPY;
 
-	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.udmabuf_size_mb) < 0) {
+	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.udmabuf_size_mb,
+			 opt.num_rx_queues) < 0) {
 		warnx("Failed setup destination mode");
 		goto out;
 	}
 
-	if (kpm_req_mode(src, rx_mode, tx_mode, opt.udmabuf_size_mb) < 0) {
+	if (kpm_req_mode(src, rx_mode, tx_mode, opt.udmabuf_size_mb, opt.num_rx_queues) < 0) {
 		warnx("Failed setup source mode");
 		goto out;
 	}
