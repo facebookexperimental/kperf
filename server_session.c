@@ -514,7 +514,7 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 		ret = devmem_setup(&self->devmem, self->tcp_sock, req->udmabuf_size_mb,
 				   req->num_rx_queues);
 		if (ret < 0) {
-			warn("Failed to setup devmem");
+			warnx("Failed to setup devmem");
 			self->quit = 1;
 			return;
 		}
