@@ -39,6 +39,7 @@ struct worker_state {
 	struct timemono prev_loop;
 	unsigned int test_len_msec;
 	struct list_head connections;
+	struct worker_state_devmem devmem;
 };
 
 struct connection {
@@ -67,9 +68,7 @@ struct connection {
 	struct list_node connections;
 };
 
-#define PATTERN_PERIOD 255
-static unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
-
+unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
 static struct connection *
 worker_find_connection_by_fd(struct worker_state *self, int fd)
@@ -655,7 +654,9 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 
 		chunk = min_t(size_t, conn->read_size, conn->to_recv);
 		if (self->rx_mode == KPM_RX_MODE_DEVMEM)
-			n = devmem_recv(conn->fd, &conn->devmem, conn->rxbuf, chunk, rep);
+			n = devmem_recv(conn->fd, &conn->devmem,
+					conn->rxbuf, chunk, &self->devmem.mem,
+					rep, conn->tot_recv);
 		else
 			n = worker_handle_regular_recv(self, conn, chunk, rep);
 		if (n == 0) {
@@ -719,7 +720,8 @@ worker_handle_conn(struct worker_state *self, int fd, unsigned int events)
 
 /* == Main loop == */
 
-void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode)
+void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
+			   struct memory_buffer *devmem)
 {
 	struct worker_state self = {
 		.main_sock = fd,
@@ -729,6 +731,8 @@ void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx
 	struct epoll_event ev, events[32];
 	unsigned char j;
 	int i, nfds;
+
+	memcpy(&self.devmem.mem, devmem, sizeof(self.devmem.mem));
 
 	list_head_init(&self.connections);
 
