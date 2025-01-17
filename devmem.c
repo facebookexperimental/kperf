@@ -349,9 +349,9 @@ static int udmabuf_alloc(struct session_state_devmem *devmem, size_t size_mb)
 	create.offset = 0;
 	create.size = size_mb * 1024 * 1024;
 
-        devmem->dmabuf_fd = ioctl(devmem->udmabuf_devfd, UDMABUF_CREATE,
+        devmem->mem.fd = ioctl(devmem->udmabuf_devfd, UDMABUF_CREATE,
 				  &create);
-        if (devmem->dmabuf_fd < 0) {
+        if (devmem->mem.fd < 0) {
 		ret = -errno;
 		goto close_memfd;
 	}
@@ -371,7 +371,7 @@ close_devfd:
 static void udmabuf_free(struct session_state_devmem *devmem)
 {
 	if (devmem->udmabuf_valid) {
-		close(devmem->dmabuf_fd);
+		close(devmem->mem.fd);
 		close(devmem->udmabuf_memfd);
 		close(devmem->udmabuf_devfd);
 		devmem->udmabuf_valid = false;
@@ -510,7 +510,7 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		queues[i].id = max_kernel_queue + i;
 	}
 
-        devmem->dmabuf_id = bind_rx_queue(ifindex, devmem->dmabuf_fd, queues,
+        devmem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem.fd, queues,
                                           num_queues, devmem->ys);
         if (devmem->dmabuf_id < 0) {
 		warnx("Failed to bind RX queue");
