@@ -15,6 +15,8 @@
 
 #include "proto.h"
 
+#define PATTERN_PERIOD 255
+
 struct server_session {
 	int cfd;
 	pid_t pid;
@@ -42,6 +44,8 @@ struct dmabuf_token {
 #endif
 
 struct memory_buffer {
+	char *buf_mem;
+	size_t size;
 	int fd;
 };
 
@@ -63,16 +67,22 @@ struct session_state_devmem {
 	bool udmabuf_valid;
 };
 
+struct worker_state_devmem {
+	struct memory_buffer mem;
+};
+
 struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
-void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode);
+void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
+                           struct memory_buffer *devmem);
 
 int devmem_setup(struct session_state_devmem *devmem, int fd,
 		 size_t udmabuf_size, int num_queues);
 int devmem_teardown(struct session_state_devmem *devmem);
 int devmem_release_tokens(int fd, struct connection_devmem *conn);
 ssize_t devmem_recv(int fd, struct connection_devmem *conn,
-		    unsigned char *rxbuf, size_t chunk, int rep);
+		    unsigned char *rxbuf, size_t chunk, struct memory_buffer *mem,
+		    int rep, __u64 tot_recv);
 
 #endif /* SERVER_H */

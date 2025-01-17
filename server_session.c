@@ -558,7 +558,7 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 	}
 	if (!pwrk->pid) {
 		close(p[0]);
-		pworker_main(p[1], self->rx_mode, self->tx_mode);
+		pworker_main(p[1], self->rx_mode, self->tx_mode, &self->devmem.mem);
 		exit(1);
 	}
 

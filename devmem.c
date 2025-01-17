@@ -16,6 +16,7 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 
+#include <linux/dma-buf.h>
 #include <linux/ethtool_netlink.h>
 #include <linux/sockios.h>
 #include <linux/udmabuf.h>
@@ -27,6 +28,8 @@
 #include <ynl-c/netdev.h>
 
 #include "server.h"
+
+extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
 static int ethtool(const char *ifname, void *data)
 {
@@ -354,10 +357,21 @@ static int udmabuf_alloc(struct session_state_devmem *devmem, size_t size_mb)
 		goto close_memfd;
 	}
 
+	devmem->mem.size = size_mb * 1024 * 1024;
+	devmem->mem.buf_mem = mmap(NULL, devmem->mem.size, PROT_READ | PROT_WRITE,
+				  MAP_SHARED, devmem->mem.fd, 0);
+
+	if (devmem->mem.buf_mem == MAP_FAILED) {
+		ret = -errno;
+		goto close_dmabuf_fd;
+	}
+
 	devmem->udmabuf_valid = true;
 
 	return 0;
 
+close_dmabuf_fd:
+	close(devmem->mem.fd);
 close_memfd:
 	close(devmem->udmabuf_memfd);
 close_devfd:
@@ -372,6 +386,7 @@ static void udmabuf_free(struct session_state_devmem *devmem)
 		close(devmem->mem.fd);
 		close(devmem->udmabuf_memfd);
 		close(devmem->udmabuf_devfd);
+		munmap(devmem->mem.buf_mem, devmem->mem.size);
 		devmem->udmabuf_valid = false;
 	}
 }
@@ -571,6 +586,43 @@ int devmem_release_tokens(int fd, struct connection_devmem *conn)
 	return ret;
 }
 
+static int devmem_validate_token(struct memory_buffer *mem,
+				 struct cmsghdr *cm, int rep, __u64 *tot_recv)
+{
+	struct dmabuf_cmsg *dmabuf_cmsg = (struct dmabuf_cmsg *)CMSG_DATA(cm);
+	struct dma_buf_sync sync = {};
+	size_t start;
+	void *pat;
+	int ret;
+
+	start = *tot_recv % PATTERN_PERIOD;
+	if (start + dmabuf_cmsg->frag_size > ARRAY_SIZE(patbuf)) {
+		warnx("dmabuf fragment size too big");
+		return -1;
+	}
+
+	sync.flags = DMA_BUF_SYNC_START;
+	ioctl(mem->fd, DMA_BUF_IOCTL_SYNC, &sync);
+
+	pat = &patbuf[start];
+	ret = memcmp(pat, mem->buf_mem + dmabuf_cmsg->frag_offset, dmabuf_cmsg->frag_size);
+
+	sync.flags = DMA_BUF_SYNC_END;
+	ioctl(mem->fd, DMA_BUF_IOCTL_SYNC, &sync);
+
+	if (ret) {
+		warnx("Data corruption %d %d %d %lld %lld %d",
+		      *(char *)mem->buf_mem, *(char *)pat, dmabuf_cmsg->frag_size,
+		      *tot_recv % PATTERN_PERIOD,
+		      *tot_recv, rep);
+		return -1;
+	}
+
+	*tot_recv += dmabuf_cmsg->frag_size;
+
+	return 0;
+}
+
 static int devmem_handle_token(int fd, struct connection_devmem *conn,
 			       struct cmsghdr *cm)
 {
@@ -598,7 +650,8 @@ static int devmem_handle_token(int fd, struct connection_devmem *conn,
 }
 
 ssize_t devmem_recv(int fd, struct connection_devmem *conn,
-		    unsigned char *rxbuf, size_t chunk, int rep)
+		    unsigned char *rxbuf, size_t chunk,
+		    struct memory_buffer *mem, int rep, __u64 tot_recv)
 {
 	struct msghdr msg = {};
 	struct iovec iov = {
@@ -624,6 +677,10 @@ ssize_t devmem_recv(int fd, struct connection_devmem *conn,
 			continue;
 
 		ret = devmem_handle_token(fd, conn, cm);
+		if (ret < 0)
+			return ret;
+
+		ret = devmem_validate_token(mem, cm, rep, &tot_recv);
 		if (ret < 0)
 			return ret;
 	}
