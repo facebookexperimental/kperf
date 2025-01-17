@@ -41,6 +41,10 @@ struct dmabuf_token {
 };
 #endif
 
+struct memory_buffer {
+	int fd;
+};
+
 struct connection_devmem {
 	struct dmabuf_token rxtok[128];
 	int rxtok_len;
@@ -51,8 +55,8 @@ struct connection_devmem {
 struct session_state_devmem {
 	struct ynl_sock *ys;
 	char ifname[IFNAMSIZ];
+	struct memory_buffer mem;
 	int dmabuf_id;
-	int dmabuf_fd;
 	int udmabuf_devfd;
 	int udmabuf_memfd;
 	int rss_context;
