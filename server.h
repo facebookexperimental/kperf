@@ -75,7 +75,7 @@ struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
 void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
-                           struct memory_buffer *devmem);
+                           struct memory_buffer *devmem, bool validate);
 
 int devmem_setup(struct session_state_devmem *devmem, int fd,
 		 size_t udmabuf_size, int num_queues);
@@ -83,6 +83,6 @@ int devmem_teardown(struct session_state_devmem *devmem);
 int devmem_release_tokens(int fd, struct connection_devmem *conn);
 ssize_t devmem_recv(int fd, struct connection_devmem *conn,
 		    unsigned char *rxbuf, size_t chunk, struct memory_buffer *mem,
-		    int rep, __u64 tot_recv);
+		    int rep, __u64 tot_recv, bool validate);
 
 #endif /* SERVER_H */

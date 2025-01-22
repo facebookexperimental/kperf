@@ -54,6 +54,7 @@ static struct {
 	char *tcp_cong_ctrl;
 	unsigned int udmabuf_size_mb;
 	unsigned int num_rx_queues;
+	bool validate;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
 	.src = "localhost",
@@ -145,11 +146,13 @@ static const struct opt_table opts[] = {
 			"kpeft client",	"Show this help message"),
 	OPT_WITHOUT_ARG("--msg-trunc", opt_set_bool, &opt.msg_trunc, "Use MSG_TRUNC on receive"),
 	OPT_WITHOUT_ARG("--msg-zerocopy", opt_set_bool, &opt.msg_zerocopy, "Use MSG_ZEROCOPY on transmit"),
-	OPT_WITHOUT_ARG("--devmem-rx", opt_set_bool, &opt.devmem_rx, "Use TCP Devmem on receive"),
+	OPT_EARLY_WITHOUT_ARG("--devmem-rx", opt_set_bool, &opt.devmem_rx, "Use TCP Devmem on receive"),
 	OPT_WITH_ARG("--udmabuf-size-mb <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.udmabuf_size_mb, "Size of RX udmabuf for TCP Devmem mode"),
 	OPT_WITH_ARG("--num-rx-queues <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.num_rx_queues, "Number of RX queues for TCP Devmem mode"),
+	OPT_WITH_ARG("--validate <yes|no>", opt_set_bool_arg, NULL, &opt.validate,
+		     "Validate payload. Default is no when using --devmem-rx; otherwise, default is yes"),
 	OPT_ENDTABLE
 };
 
@@ -562,6 +565,12 @@ int main(int argc, char *argv[])
 	int seq;
 
 	opt_register_table(opts, NULL);
+
+	/* Use early parse to set default for --validate based on --devmem-rx */
+	if (!opt_early_parse(argc, argv, opt_log_stderr))
+		exit(1);
+	opt.validate = !opt.devmem_rx;
+
 	if (!opt_parse(&argc, argv, opt_log_stderr))
 		exit(1);
 
@@ -620,6 +629,9 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
+	if (opt.msg_trunc && opt.validate)
+		errx(1, "--msg-trunc and --validate yes are mutually exclusive");
+
 	if (opt.msg_trunc && opt.devmem_rx)
 		errx(1, "--msg-trunc and --devmem-rx are mutually exclusive");
 
@@ -632,12 +644,13 @@ int main(int argc, char *argv[])
 		tx_mode = KPM_TX_MODE_SOCKET_ZEROCOPY;
 
 	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.udmabuf_size_mb,
-			 opt.num_rx_queues) < 0) {
+			 opt.num_rx_queues, opt.validate) < 0) {
 		warnx("Failed setup destination mode");
 		goto out;
 	}
 
-	if (kpm_req_mode(src, rx_mode, tx_mode, opt.udmabuf_size_mb, opt.num_rx_queues) < 0) {
+	if (kpm_req_mode(src, rx_mode, tx_mode, opt.udmabuf_size_mb, opt.num_rx_queues,
+			 opt.validate) < 0) {
 		warnx("Failed setup source mode");
 		goto out;
 	}
