@@ -40,6 +40,7 @@ struct worker_state {
 	unsigned int test_len_msec;
 	struct list_head connections;
 	struct worker_state_devmem devmem;
+	bool validate;
 };
 
 struct connection {
@@ -622,7 +623,7 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 	}
 }
 
-static ssize_t worker_handle_regular_recv(struct worker_state *self, struct connection *conn, size_t chunk, int rep)
+static ssize_t worker_handle_regular_recv(struct worker_state *self, struct connection *conn, size_t chunk, int rep, bool validate)
 {
 	bool msg_trunc = self->rx_mode == KPM_RX_MODE_SOCKET_TRUNC;
 	void *src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
@@ -634,7 +635,7 @@ static ssize_t worker_handle_regular_recv(struct worker_state *self, struct conn
 	if (n <= 0 || msg_trunc)
 		return n;
 
-	if (memcmp(conn->rxbuf, src, n))
+	if (validate && memcmp(conn->rxbuf, src, n))
 		warnx("Data corruption %d %d %ld %lld %lld %d",
 		      *conn->rxbuf, *(char *)src, n,
 		      conn->tot_recv % PATTERN_PERIOD,
@@ -656,9 +657,10 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 		if (self->rx_mode == KPM_RX_MODE_DEVMEM)
 			n = devmem_recv(conn->fd, &conn->devmem,
 					conn->rxbuf, chunk, &self->devmem.mem,
-					rep, conn->tot_recv);
+					rep, conn->tot_recv, self->validate);
 		else
-			n = worker_handle_regular_recv(self, conn, chunk, rep);
+			n = worker_handle_regular_recv(self, conn, chunk, rep,
+						       self->validate);
 		if (n == 0) {
 			warnx("zero recv");
 			worker_kill_conn(self, conn);
@@ -721,12 +723,13 @@ worker_handle_conn(struct worker_state *self, int fd, unsigned int events)
 /* == Main loop == */
 
 void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
-			   struct memory_buffer *devmem)
+			   struct memory_buffer *devmem, bool validate)
 {
 	struct worker_state self = {
 		.main_sock = fd,
 		.rx_mode = rx_mode,
 		.tx_mode = tx_mode,
+		.validate = validate,
 	};
 	struct epoll_event ev, events[32];
 	unsigned char j;

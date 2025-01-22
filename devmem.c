@@ -653,7 +653,8 @@ static int devmem_handle_token(int fd, struct connection_devmem *conn,
 
 ssize_t devmem_recv(int fd, struct connection_devmem *conn,
 		    unsigned char *rxbuf, size_t chunk,
-		    struct memory_buffer *mem, int rep, __u64 tot_recv)
+		    struct memory_buffer *mem, int rep, __u64 tot_recv,
+		    bool validate)
 {
 	struct msghdr msg = {};
 	struct iovec iov = {
@@ -682,9 +683,12 @@ ssize_t devmem_recv(int fd, struct connection_devmem *conn,
 		if (ret < 0)
 			return ret;
 
-		ret = devmem_validate_token(mem, cm, rep, &tot_recv);
-		if (ret < 0)
-			return ret;
+		if (validate) {
+			ret = devmem_validate_token(mem, cm, rep, &tot_recv);
+			if (ret < 0)
+				return ret;
+		}
+
 	}
 
 	return n;

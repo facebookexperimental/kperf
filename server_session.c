@@ -42,6 +42,7 @@ struct session_state {
 	struct list_head pworkers;
 	struct list_head tests;
 	struct session_state_devmem devmem;
+	bool validate;
 };
 
 struct connection {
@@ -522,6 +523,7 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 
 	self->rx_mode = req->rx_mode;
 	self->tx_mode = req->tx_mode;
+	self->validate = req->validate;
 
 	if (kpm_reply_empty(self->main_sock, hdr) < 1) {
 		warnx("Reply failed");
@@ -558,7 +560,8 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 	}
 	if (!pwrk->pid) {
 		close(p[0]);
-		pworker_main(p[1], self->rx_mode, self->tx_mode, &self->devmem.mem);
+		pworker_main(p[1], self->rx_mode, self->tx_mode, &self->devmem.mem,
+			     self->validate);
 		exit(1);
 	}
 
