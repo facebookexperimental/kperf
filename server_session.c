@@ -878,7 +878,7 @@ session_results_assemble(struct session_state *self, struct test *test)
 		rmsg = test->results[worker_id - test->min_worker_id];
 		if (!rmsg) {
 			warnx("No results for worker %d", worker_id);
-			return;
+			goto out;
 		}
 		for (j = 0; j < rmsg->n_conns; j++) {
 			if (rmsg->res[j].connection_id == conn_id) {
@@ -888,7 +888,7 @@ session_results_assemble(struct session_state *self, struct test *test)
 		}
 		if (!res) {
 			warnx("No results for connection %d", conn_id);
-			return;
+			goto out;
 		}
 
 		memcpy(&reply->res[i], res, sizeof(*res));
@@ -896,6 +896,9 @@ session_results_assemble(struct session_state *self, struct test *test)
 
 	kpm_dbg("Results sent");
 	kpm_send(self->main_sock, &reply->hdr, sz, KPM_MSG_TYPE_TEST_RESULT);
+
+out:
+	free(reply);
 }
 
 static void
