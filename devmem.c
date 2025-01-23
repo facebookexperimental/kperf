@@ -181,6 +181,8 @@ static int rss_context_equal(struct session_state_devmem *devmem, int start_queu
 		goto delete_context;
 	}
 
+	free(set);
+
 	return 0;
 
 delete_context:
