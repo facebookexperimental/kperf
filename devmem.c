@@ -324,23 +324,23 @@ static int udmabuf_alloc(struct session_state_devmem *devmem, size_t size_mb)
 	if (ret < 0)
 		return ret;
 
-	devmem->udmabuf_devfd = open("/dev/udmabuf", O_RDWR);
-	if (devmem->udmabuf_devfd < 0)
+	devmem->mem.devfd = open("/dev/udmabuf", O_RDWR);
+	if (devmem->mem.devfd < 0)
 		return -errno;
 
-	devmem->udmabuf_memfd = memfd_create("udmabuf-test", MFD_ALLOW_SEALING);
-	if (devmem->udmabuf_memfd < 0) {
+	devmem->mem.memfd = memfd_create("udmabuf-test", MFD_ALLOW_SEALING);
+	if (devmem->mem.memfd < 0) {
 		ret = -errno;
 		goto close_devfd;
 	}
 
-	ret = fcntl(devmem->udmabuf_memfd, F_ADD_SEALS, F_SEAL_SHRINK);
+	ret = fcntl(devmem->mem.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
 	if (ret < 0) {
 		ret = -errno;
 		goto close_memfd;
 	}
 
-	ret = ftruncate(devmem->udmabuf_memfd, size_mb * 1024 * 1024);
+	ret = ftruncate(devmem->mem.memfd, size_mb * 1024 * 1024);
 	if (ret < 0) {
 		ret = -errno;
 		goto close_memfd;
@@ -348,11 +348,11 @@ static int udmabuf_alloc(struct session_state_devmem *devmem, size_t size_mb)
 
 	memset(&create, 0, sizeof(create));
 
-	create.memfd = devmem->udmabuf_memfd;
+	create.memfd = devmem->mem.memfd;
 	create.offset = 0;
 	create.size = size_mb * 1024 * 1024;
 
-        devmem->mem.fd = ioctl(devmem->udmabuf_devfd, UDMABUF_CREATE,
+        devmem->mem.fd = ioctl(devmem->mem.devfd, UDMABUF_CREATE,
 				  &create);
         if (devmem->mem.fd < 0) {
 		ret = -errno;
@@ -368,28 +368,28 @@ static int udmabuf_alloc(struct session_state_devmem *devmem, size_t size_mb)
 		goto close_dmabuf_fd;
 	}
 
-	devmem->udmabuf_valid = true;
+	devmem->mem.valid = true;
 
 	return 0;
 
 close_dmabuf_fd:
 	close(devmem->mem.fd);
 close_memfd:
-	close(devmem->udmabuf_memfd);
+	close(devmem->mem.memfd);
 close_devfd:
-	close(devmem->udmabuf_devfd);
+	close(devmem->mem.devfd);
 
 	return ret;
 }
 
 static void udmabuf_free(struct session_state_devmem *devmem)
 {
-	if (devmem->udmabuf_valid) {
+	if (devmem->mem.valid) {
 		close(devmem->mem.fd);
-		close(devmem->udmabuf_memfd);
-		close(devmem->udmabuf_devfd);
+		close(devmem->mem.memfd);
+		close(devmem->mem.devfd);
 		munmap(devmem->mem.buf_mem, devmem->mem.size);
-		devmem->udmabuf_valid = false;
+		devmem->mem.valid = false;
 	}
 }
 
@@ -525,9 +525,9 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		queues[i].id = max_kernel_queue + i;
 	}
 
-        devmem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem.fd, queues,
+        devmem->mem.dmabuf_id = bind_rx_queue(ifindex, devmem->mem.fd, queues,
                                           num_queues, devmem->ys);
-        if (devmem->dmabuf_id < 0) {
+        if (devmem->mem.dmabuf_id < 0) {
 		warnx("Failed to bind RX queue");
 		ret = -1;
 		goto free_queues;
