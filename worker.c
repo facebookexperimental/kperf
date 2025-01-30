@@ -93,6 +93,8 @@ worker_kill_conn(struct worker_state *self, struct connection *conn)
 		warn("Failed to del poll out");
 	if (self->rx_mode == KPM_RX_MODE_DEVMEM)
 		(void)devmem_release_tokens(conn->fd, &conn->devmem);
+	if (self->tx_mode == KPM_TX_MODE_DEVMEM)
+		devmem_teardown_conn(&conn->devmem);
 	close(conn->fd);
 	list_del(&conn->connections);
 	free(conn->rxbuf);
@@ -329,6 +331,13 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 			warnx("Failed to set SO_ZEROCOPY");
 			self->quit = 1;
 			return;
+		}
+
+		if (self->tx_mode == KPM_TX_MODE_DEVMEM) {
+			if (devmem_setup_conn(conn->fd, &conn->devmem) < 0) {
+				self->quit = 1;
+				return;
+			}
 		}
 
 		ev.events = EPOLLIN | EPOLLOUT;
@@ -579,12 +588,19 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 	int flags = msg_zerocopy ? MSG_ZEROCOPY : 0;
 
 	while (rep--) {
-		void *src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
 		size_t chunk;
+		void *src;
 		ssize_t n;
 
 		chunk = min_t(size_t, conn->write_size, conn->to_send);
-		n = send(conn->fd, src, chunk, MSG_DONTWAIT | flags);
+
+		if (self->tx_mode == KPM_TX_MODE_DEVMEM) {
+			n = devmem_sendmsg(conn->fd, &conn->devmem,
+					   conn->tot_sent % PATTERN_PERIOD, chunk);
+		} else {
+			src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
+			n = send(conn->fd, src, chunk, MSG_DONTWAIT | flags);
+		}
 		if (n == 0) {
 			warnx("zero send chunk:%zd to_send:%lld to_recv:%lld",
 			      chunk, conn->to_send, conn->to_recv);
@@ -604,7 +620,7 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 
 		conn->to_send -= n;
 		conn->tot_sent += n;
-		if (msg_zerocopy) {
+		if (msg_zerocopy || self->tx_mode == KPM_TX_MODE_DEVMEM) {
 			conn->to_send_comp += 1;
 			kpm_dbg("queued send completion, total %d",
 				conn->to_send_comp);

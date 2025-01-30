@@ -131,6 +131,7 @@ enum kpm_rx_mode {
 enum kpm_tx_mode {
 	KPM_TX_MODE_SOCKET,
 	KPM_TX_MODE_SOCKET_ZEROCOPY,
+	KPM_TX_MODE_DEVMEM,
 };
 
 struct kpm_mode {

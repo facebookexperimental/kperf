@@ -24,6 +24,7 @@ int verbose = 3;
 static struct {
 	bool msg_trunc;
 	bool devmem_rx;
+	bool devmem_tx;
 	bool msg_zerocopy;
 	bool tls;
 	bool tls_rx;
@@ -147,6 +148,7 @@ static const struct opt_table opts[] = {
 	OPT_WITHOUT_ARG("--msg-trunc", opt_set_bool, &opt.msg_trunc, "Use MSG_TRUNC on receive"),
 	OPT_WITHOUT_ARG("--msg-zerocopy", opt_set_bool, &opt.msg_zerocopy, "Use MSG_ZEROCOPY on transmit"),
 	OPT_EARLY_WITHOUT_ARG("--devmem-rx", opt_set_bool, &opt.devmem_rx, "Use TCP Devmem on receive"),
+	OPT_WITHOUT_ARG("--devmem-tx", opt_set_bool, &opt.devmem_tx, "Use TCP Devmem on transmit"),
 	OPT_WITH_ARG("--udmabuf-size-mb <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.udmabuf_size_mb, "Size of RX udmabuf for TCP Devmem mode"),
 	OPT_WITH_ARG("--num-rx-queues <arg>", opt_set_uintval, opt_show_uintval,
@@ -640,8 +642,13 @@ int main(int argc, char *argv[])
 	else if (opt.devmem_rx)
 		rx_mode = KPM_RX_MODE_DEVMEM;
 
+	if (opt.msg_zerocopy && opt.devmem_tx)
+		errx(1, "--msg-zerocopy and --devmem-tx are mutually exclusive");
+
 	if (opt.msg_zerocopy)
 		tx_mode = KPM_TX_MODE_SOCKET_ZEROCOPY;
+	else if (opt.devmem_tx)
+		tx_mode = KPM_TX_MODE_DEVMEM;
 
 	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.udmabuf_size_mb,
 			 opt.num_rx_queues, opt.validate) < 0) {

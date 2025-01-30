@@ -29,6 +29,8 @@
 
 #include "server.h"
 
+#define ROUND_UP(n, d) (((n) + (d) - 1) / (d))
+
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
 static int ethtool(const char *ifname, void *data)
@@ -292,6 +294,42 @@ out:
 	return ret;
 }
 
+static int bind_tx_queue(unsigned int ifindex, unsigned int dmabuf_fd,
+			 struct ynl_sock *ys)
+{
+	struct netdev_bind_tx_req *req = NULL;
+	struct netdev_bind_tx_rsp *rsp = NULL;
+	int ret;
+
+	req = netdev_bind_tx_req_alloc();
+	netdev_bind_tx_req_set_ifindex(req, ifindex);
+	netdev_bind_tx_req_set_fd(req, dmabuf_fd);
+
+	rsp = netdev_bind_tx(ys, req);
+	if (!rsp) {
+		warnx("netdev_bind_tx");
+		ret = -1;
+		goto err_close;
+	}
+
+	if (!rsp->_present.id) {
+		warnx("id not present");
+		ret = -1;
+		goto err_close;
+	}
+
+	ret = rsp->id;
+	netdev_bind_tx_req_free(req);
+	netdev_bind_tx_rsp_free(rsp);
+
+	return ret;
+
+err_close:
+	netdev_bind_tx_req_free(req);
+	ynl_sock_destroy(ys);
+	return ret;
+}
+
 #define UDMABUF_LIMIT_PATH "/sys/module/udmabuf/parameters/size_limit_mb"
 
 static int udmabuf_check_size(size_t size_mb)
@@ -433,6 +471,21 @@ static int find_iface(struct sockaddr_in6 *addr, char ifname[IFNAMSIZ])
 	return -ENODEV;
 }
 
+void udmabuf_memcpy_to_device(struct memory_buffer *dst, size_t off,
+			      void *src, int n)
+{
+	struct dma_buf_sync sync = {};
+
+	sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE;
+	ioctl(dst->fd, DMA_BUF_IOCTL_SYNC, &sync);
+
+	memcpy(dst->buf_mem + off, src, n);
+
+	sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE;
+	ioctl(dst->fd, DMA_BUF_IOCTL_SYNC, &sync);
+}
+
+/* Setup Devmem RX */
 int devmem_setup(struct session_state_devmem *devmem, int fd,
 		 size_t udmabuf_size_mb, int num_queues)
 {
@@ -691,4 +744,102 @@ ssize_t devmem_recv(int fd, struct connection_devmem *conn,
 	}
 
 	return n;
+}
+
+int devmem_sendmsg(int fd, struct connection_devmem *devmem, size_t off, size_t n)
+{
+	char ctrl_data[CMSG_SPACE(sizeof(int))];
+	struct msghdr msg = { 0 };
+	struct cmsghdr *cmsg;
+	struct iovec iov;
+
+	iov.iov_base = (void *)off;
+	iov.iov_len = n;
+
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+
+	msg.msg_control = ctrl_data;
+	msg.msg_controllen = sizeof(ctrl_data);
+
+	cmsg = CMSG_FIRSTHDR(&msg);
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type = SCM_DEVMEM_DMABUF;
+	cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+	*((int *)CMSG_DATA(cmsg)) = devmem->mem.dmabuf_id;
+
+	return sendmsg(fd, &msg, MSG_SOCK_DEVMEM);
+}
+
+/* Setup Devmem TX */
+int devmem_setup_conn(int fd, struct connection_devmem *devmem)
+{
+	char ifname[IFNAMSIZ] = {};
+	struct sockaddr_in6 addr;
+	struct ynl_error yerr;
+	socklen_t optlen;
+	int ifindex;
+	int opt = 1;
+	int ret;
+
+	devmem->ys = ynl_sock_create(&ynl_netdev_family, &yerr);
+	if (!devmem->ys) {
+		warnx("Failed to setup YNL socket: %s", yerr.msg);
+		return -1;
+	}
+
+	optlen = sizeof(addr);
+	if (getsockname(fd, (struct sockaddr *)&addr, &optlen) < 0) {
+		warn("Failed to query socket address");
+		return -1;
+	}
+
+	if (addr.sin6_family == AF_INET)
+		inet_to_inet6((void *)&addr, &addr);
+
+	ifindex = find_iface(&addr, ifname);
+	if (ifindex < 0) {
+		warnx("Failed to resolve ifindex: %s", strerror(-ifindex));
+		return -1;
+	}
+
+	if (udmabuf_alloc(&devmem->mem, "udmabuf-test-tx",
+			  ROUND_UP(sizeof(patbuf), 1024 * 1024)) < 0) {
+		warnx("Failed to allocate devmem tx buffer");
+		return -1;
+	}
+
+	devmem->mem.dmabuf_id = bind_tx_queue(ifindex, devmem->mem.fd,
+					      devmem->ys);
+	if (devmem->mem.dmabuf_id < 0) {
+		ret = -1;
+		goto free_udmabuf;
+	}
+
+	udmabuf_memcpy_to_device(&devmem->mem, 0, patbuf, sizeof(patbuf));
+
+	if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, ifname, IFNAMSIZ)) {
+		warn("failed to bind device to socket");
+		ret = -1;
+		goto free_udmabuf;
+	}
+
+	if (setsockopt(fd, SOL_SOCKET, SO_ZEROCOPY, &opt, sizeof(opt))) {
+		warnx("failed to set SO_ZEROCOPY");
+		ret = -1;
+		goto free_udmabuf;
+	}
+
+	return 0;
+
+free_udmabuf:
+	udmabuf_free(&devmem->mem);
+	return ret;
+}
+
+void devmem_teardown_conn(struct connection_devmem *devmem)
+{
+	udmabuf_free(&devmem->mem);
+	ynl_sock_destroy(devmem->ys);
+	devmem->ys = NULL;
 }
