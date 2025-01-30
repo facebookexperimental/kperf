@@ -47,6 +47,9 @@ struct memory_buffer {
 	char *buf_mem;
 	size_t size;
 	int fd;
+	int devfd;
+	int memfd;
+	int dmabuf_id;
 };
 
 struct connection_devmem {
@@ -60,11 +63,7 @@ struct session_state_devmem {
 	struct ynl_sock *ys;
 	char ifname[IFNAMSIZ];
 	struct memory_buffer mem;
-	int dmabuf_id;
-	int udmabuf_devfd;
-	int udmabuf_memfd;
 	int rss_context;
-	bool udmabuf_valid;
 };
 
 struct worker_state_devmem {
