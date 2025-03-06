@@ -28,6 +28,8 @@
 #include "proto_dbg.h"
 #include "server.h"
 
+extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
+
 struct session_state {
 	int main_sock;
 	int epollfd;
@@ -977,6 +979,19 @@ static void server_session_loop(int fd)
 	struct session_state self = { .main_sock = fd, };
 	struct epoll_event ev = {}, events[32];
 	struct connection *conn, *next;
+	unsigned char j;
+	int i;
+
+	/* Initialize the data buffer we send/receive, it must match on both
+	 * ends, this is how we catch data corruption (ekhm kTLS..).
+	 *
+	 * We need to do this before initializing TX buffers with the pattern
+	 * (e.g., devmem).
+	 */
+	for (i = 0, j = 0; i < (int)ARRAY_SIZE(patbuf); i++, j++) {
+		j = j ?: 1;
+		patbuf[i] = j;
+	}
 
 	list_head_init(&self.connections);
 	list_head_init(&self.pworkers);
@@ -992,7 +1007,7 @@ static void server_session_loop(int fd)
 		err(2, "Failed to init epoll");
 
 	while (!self.quit) {
-		int i, nfds;
+		int nfds;
 
 		nfds = epoll_wait(self.epollfd, events, ARRAY_SIZE(events), -1);
 		if (nfds < 0)
