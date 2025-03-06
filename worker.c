@@ -733,18 +733,9 @@ void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx
 		.devmem = { .mem = devmem },
 	};
 	struct epoll_event ev, events[32];
-	unsigned char j;
 	int i, nfds;
 
 	list_head_init(&self.connections);
-
-	/* Initialize the data buffer we send/receive, it must match
-	 * on both ends, this is how we catch data corruption (ekhm kTLS..)
-	 */
-	for (i = 0, j = 0; i < (int)ARRAY_SIZE(patbuf); i++, j++) {
-		j = j ?: 1;
-		patbuf[i] = j;
-	}
 
 	/* Init epoll */
 	self.epollfd = epoll_create1(0);
