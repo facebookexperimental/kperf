@@ -10,10 +10,18 @@ CFLAGS += -I$(YNL_PATH)/include/
 LIBS=-lm -L$(CCAN_PATH) -pthread -lccan
 LIBS += -L$(YNL_PATH) -lynl
 
+ifdef USE_CUDA
+    CFLAGS += -I/usr/local/cuda/include/ -DUSE_CUDA
+endif
+
 include $(wildcard *.d)
 
 all: server client units
 units: bipartite_match cpu_stat
+
+ifdef USE_CUDA
+server: LIBS += -lcuda -lcudart -L/usr/local/cuda/lib64
+endif
 
 server: $(CCAN_PATH)/libccan.a $(YNL_PATH)/libynl.a server.o server_session.o proto.o worker.o devmem.o cpu_stat.o tcp.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
