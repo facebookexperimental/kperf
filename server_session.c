@@ -731,6 +731,8 @@ bad_req:
 		for (j = 0; j < msg->n_conns; j++) {
 			conn = session_find_connection_by_id(self, msg->specs[j].connection_id);
 			fdpass_send(pwrk->fd, conn->fd);
+			/* close to ensure the only open descriptors are owned by the worker. */
+			close(conn->fd);
 		}
 	}
 
