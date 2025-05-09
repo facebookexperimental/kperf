@@ -53,6 +53,7 @@ struct memory_buffer {
 };
 
 struct memory_provider {
+	int (*dev_init)(struct pci_dev *dev);
 	struct memory_buffer *(*alloc)(size_t size);
 	void (*free)(struct memory_buffer *mem);
 	void (*memcpy_to_device)(struct memory_buffer *dst, size_t off,

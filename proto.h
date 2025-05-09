@@ -133,6 +133,16 @@ enum kpm_tx_mode {
 	KPM_TX_MODE_SOCKET_ZEROCOPY,
 };
 
+#define DEVICE_DOMAIN_ANY 0xffff
+#define DEVICE_BUS_ANY 0xff
+#define DEVICE_DEVICE_ANY 0xff
+
+struct pci_dev {
+	__u16 domain;
+	__u8 bus;
+	__u8 device;
+};
+
 struct kpm_mode {
 	struct kpm_header hdr;
 	enum kpm_rx_mode rx_mode;
