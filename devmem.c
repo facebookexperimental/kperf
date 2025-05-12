@@ -315,34 +315,43 @@ static int udmabuf_check_size(size_t size_mb)
 	return ret;
 }
 
-static int udmabuf_alloc(struct memory_buffer *mem, const char *name, size_t size_mb)
+static struct memory_buffer *udmabuf_alloc(size_t size)
 {
 	struct udmabuf_create create;
+	struct memory_buffer *mem;
 	int ret;
 
-	ret = udmabuf_check_size(size_mb);
-	if (ret < 0)
-		return ret;
+	mem = calloc(1, sizeof(*mem));
+	if (!mem)
+		return NULL;
+
+	ret = udmabuf_check_size(size / 1024 / 1024);
+	if (ret < 0) {
+		warnx("Failed: udmabuf_check_size(), ret=%d", ret);
+		goto free_mem;
+	}
 
 	mem->devfd = open("/dev/udmabuf", O_RDWR);
-	if (mem->devfd < 0)
-		return -errno;
+	if (mem->devfd < 0) {
+		warn("Failed to open /dev/udmabuf");
+		goto free_mem;
+	}
 
-	mem->memfd = memfd_create(name, MFD_ALLOW_SEALING);
+	mem->memfd = memfd_create("udmabuf-test", MFD_ALLOW_SEALING);
 	if (mem->memfd < 0) {
-		ret = -errno;
+		warn("memfd_create() failed");
 		goto close_devfd;
 	}
 
 	ret = fcntl(mem->memfd, F_ADD_SEALS, F_SEAL_SHRINK);
 	if (ret < 0) {
-		ret = -errno;
+		warn("fcntl() failed");
 		goto close_memfd;
 	}
 
-	ret = ftruncate(mem->memfd, size_mb * 1024 * 1024);
+	ret = ftruncate(mem->memfd, size);
 	if (ret < 0) {
-		ret = -errno;
+		warn("ftruncate() failed");
 		goto close_memfd;
 	}
 
@@ -350,15 +359,15 @@ static int udmabuf_alloc(struct memory_buffer *mem, const char *name, size_t siz
 
 	create.memfd = mem->memfd;
 	create.offset = 0;
-	create.size = size_mb * 1024 * 1024;
+	create.size = size;
 
         mem->fd = ioctl(mem->devfd, UDMABUF_CREATE, &create);
         if (mem->fd < 0) {
-		ret = -errno;
+		warn("ioctl(mem->devfd) failed");
 		goto close_memfd;
 	}
 
-	mem->size = size_mb * 1024 * 1024;
+	mem->size = size;
 	mem->buf_mem = mmap(NULL, mem->size, PROT_READ | PROT_WRITE,
 				  MAP_SHARED, mem->fd, 0);
 
@@ -367,7 +376,7 @@ static int udmabuf_alloc(struct memory_buffer *mem, const char *name, size_t siz
 		goto close_dmabuf_fd;
 	}
 
-	return 0;
+	return mem;
 
 close_dmabuf_fd:
 	close(mem->fd);
@@ -375,8 +384,9 @@ close_memfd:
 	close(mem->memfd);
 close_devfd:
 	close(mem->devfd);
-
-	return ret;
+free_mem:
+	free(mem);
+	return NULL;
 }
 
 static void udmabuf_free(struct memory_buffer *mem)
@@ -387,6 +397,7 @@ static void udmabuf_free(struct memory_buffer *mem)
 		close(mem->devfd);
 		munmap(mem->buf_mem, mem->size);
 	}
+	free(mem);
 }
 
 static void inet_to_inet6(struct sockaddr *addr, struct sockaddr_in6 *out)
@@ -430,6 +441,29 @@ static int find_iface(struct sockaddr_in6 *addr, char ifname[IFNAMSIZ])
 	return -ENODEV;
 }
 
+void udmabuf_memcpy_to_device(struct memory_buffer *dst, size_t off,
+			      void *src, int n)
+{
+	struct dma_buf_sync sync = {};
+
+	sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE;
+	ioctl(dst->fd, DMA_BUF_IOCTL_SYNC, &sync);
+
+	memcpy(dst->buf_mem + off, src, n);
+
+	sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE;
+	ioctl(dst->fd, DMA_BUF_IOCTL_SYNC, &sync);
+}
+
+static struct memory_provider udmabuf_memory_provider = {
+	.alloc = udmabuf_alloc,
+	.free = udmabuf_free,
+	.memcpy_to_device = udmabuf_memcpy_to_device,
+};
+
+static struct memory_provider *rxmp = &udmabuf_memory_provider;
+
+/* Setup Devmem RX */
 int devmem_setup(struct session_state_devmem *devmem, int fd,
 		 size_t udmabuf_size_mb, int num_queues)
 {
@@ -476,9 +510,9 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		goto sock_destroy;
 	}
 
-	ret = udmabuf_alloc(&devmem->mem, "udmabuf-test-rx", udmabuf_size_mb);
-	if (ret < 0) {
-		warnx("Failed to allocate udmabuf: %s", strerror(-ret));
+	devmem->mem = rxmp->alloc(udmabuf_size_mb * 1024 * 1024);
+	if (!devmem->mem) {
+		warnx("Failed to allocate udmabuf");
 		ret = -1;
 		goto sock_destroy;
 	}
@@ -521,9 +555,9 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		queues[i].id = max_kernel_queue + i;
 	}
 
-        devmem->mem.dmabuf_id = bind_rx_queue(ifindex, devmem->mem.fd, queues,
+        devmem->mem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem->fd, queues,
                                           num_queues, devmem->ys);
-        if (devmem->mem.dmabuf_id < 0) {
+        if (devmem->mem->dmabuf_id < 0) {
 		warnx("Failed to bind RX queue");
 		ret = -1;
 		goto free_queues;
@@ -538,7 +572,7 @@ undo_rss_context:
 undo_rss:
 	rss_equal(ifname, rxqn);
 free_udmabuf:
-	udmabuf_free(&devmem->mem);
+	rxmp->free(devmem->mem);
 sock_destroy:
 	ynl_sock_destroy(devmem->ys);
 	devmem->ys = NULL;
@@ -561,7 +595,7 @@ int devmem_teardown(struct session_state_devmem *devmem)
 	}
 	if (devmem->ys)
 		ynl_sock_destroy(devmem->ys);
-	udmabuf_free(&devmem->mem);
+	rxmp->free(devmem->mem);
 	return 0;
 }
 
