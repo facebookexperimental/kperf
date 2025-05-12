@@ -656,7 +656,7 @@ worker_handle_recv(struct worker_state *self, struct connection *conn)
 		chunk = min_t(size_t, conn->read_size, conn->to_recv);
 		if (self->rx_mode == KPM_RX_MODE_DEVMEM)
 			n = devmem_recv(conn->fd, &conn->devmem,
-					conn->rxbuf, chunk, &self->devmem.mem,
+					conn->rxbuf, chunk, self->devmem.mem,
 					rep, conn->tot_recv, self->validate);
 		else
 			n = worker_handle_regular_recv(self, conn, chunk, rep,
@@ -730,12 +730,11 @@ void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx
 		.rx_mode = rx_mode,
 		.tx_mode = tx_mode,
 		.validate = validate,
+		.devmem = { .mem = devmem },
 	};
 	struct epoll_event ev, events[32];
 	unsigned char j;
 	int i, nfds;
-
-	memcpy(&self.devmem.mem, devmem, sizeof(self.devmem.mem));
 
 	list_head_init(&self.connections);
 

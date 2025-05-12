@@ -52,6 +52,15 @@ struct memory_buffer {
 	int dmabuf_id;
 };
 
+struct memory_provider {
+	struct memory_buffer *(*alloc)(size_t size);
+	void (*free)(struct memory_buffer *mem);
+	void (*memcpy_to_device)(struct memory_buffer *dst, size_t off,
+				 void *src, int n);
+	void (*memcpy_from_device)(void *dst, struct memory_buffer *src,
+				   size_t off, int n);
+};
+
 struct connection_devmem {
 	struct dmabuf_token rxtok[128];
 	int rxtok_len;
@@ -62,12 +71,12 @@ struct connection_devmem {
 struct session_state_devmem {
 	struct ynl_sock *ys;
 	char ifname[IFNAMSIZ];
-	struct memory_buffer mem;
+	struct memory_buffer *mem;
 	int rss_context;
 };
 
 struct worker_state_devmem {
-	struct memory_buffer mem;
+	struct memory_buffer *mem;
 };
 
 struct server_session *
