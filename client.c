@@ -55,7 +55,7 @@ static struct {
 	unsigned int n_conns;
 	unsigned int max_pace;
 	char *tcp_cong_ctrl;
-	unsigned int udmabuf_size_mb;
+	unsigned int dmabuf_size_mb;
 	unsigned int num_rx_queues;
 	bool validate;
 } opt = {
@@ -74,7 +74,7 @@ static struct {
 	.cpu_dst_wrk = -1,
 	.n_conns = 1,
 	/* 128M is enough to drive one queue at 200G */
-	.udmabuf_size_mb = 128,
+	.dmabuf_size_mb = 128,
 	.num_rx_queues = 1,
 	.devmem_rx_memory = MEMORY_PROVIDER_HOST,
 	.devmem_dst_dev = {
@@ -242,7 +242,7 @@ static const struct opt_table opts[] = {
 		     opt_show_memory_provider, &opt.devmem_rx_memory,
 		     "Select the memory provider for TCP Devmem RX"),
 	OPT_WITH_ARG("--dmabuf-size-mb <arg>", opt_set_uintval, opt_show_uintval,
-		     &opt.udmabuf_size_mb, "Size of RX dmabuf for TCP Devmem mode"),
+		     &opt.dmabuf_size_mb, "Size of RX dmabuf for TCP Devmem mode"),
 	OPT_WITH_ARG("--num-rx-queues <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.num_rx_queues, "Number of RX queues for TCP Devmem mode"),
 	OPT_WITH_ARG("--validate <yes|no>", opt_set_bool_arg, NULL, &opt.validate,
@@ -744,14 +744,14 @@ int main(int argc, char *argv[])
 	if (opt.msg_zerocopy)
 		tx_mode = KPM_TX_MODE_SOCKET_ZEROCOPY;
 
-	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.udmabuf_size_mb,
+	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.dmabuf_size_mb,
 			 opt.num_rx_queues, opt.validate,
 			 opt.devmem_rx_memory, &dst_dev) < 0) {
 		warnx("Failed setup destination mode");
 		goto out;
 	}
 
-	if (kpm_req_mode(src, rx_mode, tx_mode, opt.udmabuf_size_mb,
+	if (kpm_req_mode(src, rx_mode, tx_mode, opt.dmabuf_size_mb,
 			 opt.num_rx_queues, opt.validate,
 			 opt.devmem_rx_memory, &dst_dev) < 0) {
 		warnx("Failed setup source mode");
