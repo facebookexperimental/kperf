@@ -512,7 +512,7 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	req = (void *)hdr;
 
 	if (self->tcp_sock && req->rx_mode == KPM_RX_MODE_DEVMEM) {
-		ret = devmem_setup(&self->devmem, self->tcp_sock, req->udmabuf_size_mb,
+		ret = devmem_setup(&self->devmem, self->tcp_sock, req->dmabuf_size_mb,
 				   req->num_rx_queues, req->rx_provider,
 				   &req->dev);
 		if (ret < 0) {

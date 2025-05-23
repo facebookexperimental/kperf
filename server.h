@@ -101,7 +101,7 @@ void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx
                            struct memory_buffer *devmem, bool validate);
 
 int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t udmabuf_size, int num_queues,
+		 size_t dmabuf_size, int num_queues,
 		 enum memory_provider_type provider, struct pci_dev *dev);
 int devmem_teardown(struct session_state_devmem *devmem);
 int devmem_release_tokens(int fd, struct connection_devmem *conn);
