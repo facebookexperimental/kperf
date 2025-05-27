@@ -16,6 +16,7 @@
 #include <ccan/opt/opt.h>
 
 #include "bipartite_match.h"
+#include "cpu_affinity.h"
 #include "proto.h"
 #include "proto_dbg.h"
 
@@ -48,6 +49,8 @@ static struct {
 	unsigned int cpu_max;
 	int cpu_src_wrk;
 	int cpu_dst_wrk;
+	char *cpu_src_wrk_affinity;
+	char *cpu_dst_wrk_affinity;
 	unsigned int mss;
 	unsigned int n_conns;
 	unsigned int max_pace;
@@ -69,6 +72,8 @@ static struct {
 	.cpu_max = 255,
 	.cpu_src_wrk = -1,
 	.cpu_dst_wrk = -1,
+	.cpu_src_wrk_affinity = NULL,
+	.cpu_dst_wrk_affinity = NULL,
 	.n_conns = 1,
 	/* 128M is enough to drive one queue at 200G */
 	.udmabuf_size_mb = 128,
@@ -109,6 +114,10 @@ static const struct opt_table opts[] = {
 		     &opt.cpu_src_wrk, "max CPU number for connection"),
 	OPT_WITH_ARG("--cpu-dst-wrk <arg>", opt_set_intval, opt_show_intval,
 		     &opt.cpu_dst_wrk, "max CPU number for connection"),
+	OPT_WITH_ARG("--cpu-src-wrk-affinity <arg>", opt_set_charp, opt_show_charp,
+		     &opt.cpu_src_wrk_affinity, "set source worker CPU affinity to a cpu list (e.g., '0-7' or '8')"),
+	OPT_WITH_ARG("--cpu-dst-wrk-affinity <arg>", opt_set_charp, opt_show_charp,
+		     &opt.cpu_dst_wrk_affinity, "set destination worker CPU affinity to a cpu list (e.g., '0-7' or '8')"),
 	OPT_WITHOUT_ARG("--cross-pin", opt_set_bool, &opt.xpin, "Cross-pin"),
 	OPT_WITH_ARG("--time|-t <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.time, "Test length"),
@@ -548,6 +557,7 @@ int main(int argc, char *argv[])
 {
 	enum kpm_rx_mode rx_mode = KPM_RX_MODE_SOCKET;
 	enum kpm_tx_mode tx_mode = KPM_TX_MODE_SOCKET;
+	struct cpu_affinity src_ca, dst_ca;
 	unsigned int src_ncpus, dst_ncpus;
 	struct __kpm_generic_u32 *ack_id;
 	__u32 *src_wrk_cpu, *dst_wrk_cpu;
@@ -589,6 +599,29 @@ int main(int argc, char *argv[])
 			errx(1, "Cross-pin can't use pin off");
 		if (opt.n_conns != 2)
 			errx(1, "Cross-pin only works with 2 connections");
+	}
+
+	if (opt.cpu_src_wrk_affinity || opt.cpu_dst_wrk_affinity) {
+		if (opt.xpin)
+			errx(1, "--cross-pin and --cpu-{src,dst}-wrk-affinity are mutually exclusive");
+		if (opt.pin_off != 0)
+			errx(1, "--pin-off and --cpu-{src,dst}-wrk-affinity are mutually exclusive");
+	}
+
+	if (opt.cpu_src_wrk_affinity) {
+		if (opt.cpu_src_wrk != -1)
+			errx(1, "--cpu-src-wrk and --cpu-src-wrk-affinity are mutually exclusive");
+
+		if (parse_cpu_list(opt.cpu_src_wrk_affinity, &src_ca) < 0)
+			warnx("failed to parse src affinity list %s", opt.cpu_src_wrk_affinity);
+	}
+
+	if (opt.cpu_dst_wrk_affinity) {
+		if (opt.cpu_dst_wrk != -1)
+			errx(1, "--cpu-dst-wrk and --cpu-dst-wrk-affinity are mutually exclusive");
+
+		if (parse_cpu_list(opt.cpu_dst_wrk_affinity, &dst_ca) < 0)
+			warnx("failed to parse dst affinity list %s", opt.cpu_dst_wrk_affinity);
 	}
 
 	src_wrk_id = calloc(opt.n_conns, sizeof(*src_wrk_id));
@@ -695,19 +728,64 @@ int main(int argc, char *argv[])
 	for (i = 0; i < opt.n_conns; i++) {
 		struct kpm_connect_reply *id = &conns[i];
 
-		if (opt.xpin)
+		if (opt.cpu_src_wrk_affinity) {
+			int src_cpu;
+
+			while (1) {
+				src_cpu = cpu_affinity_alloc_cpu(&src_ca);
+
+				if (src_cpu < 0)
+					errx(1,
+					     "failed to alloc cpu from affinity list %s, err=%d\n",
+					     opt.cpu_src_wrk_affinity, src_cpu);
+
+				if (src_cpu == (int)id->remote.cpu || src_cpu == (int)id->local.cpu) {
+					dbg("skipping cpu %d remote %d, local %d\n",
+					    src_cpu, id->remote.cpu, id->local.cpu);
+					continue;
+				}
+
+				break;
+			}
+
+			src_wrk_cpu[i] = src_cpu;
+		} else if (opt.xpin) {
 			src_wrk_cpu[i] = conns[!i].local.cpu;
-		else if (opt.cpu_src_wrk != -1)
+		} else if (opt.cpu_src_wrk != -1) {
 			src_wrk_cpu[i] = opt.cpu_src_wrk;
-		else
+		} else {
 			src_wrk_cpu[i] = id->local.cpu + opt.pin_off;
+		}
 
 		if (opt.xpin)
 			dst_wrk_cpu[i] = conns[!i].remote.cpu;
-		if (opt.cpu_dst_wrk != -1)
+
+		if (opt.cpu_dst_wrk_affinity) {
+			int dst_cpu;
+
+			while (1) {
+				dst_cpu = cpu_affinity_alloc_cpu(&dst_ca);
+
+				if (dst_cpu < 0)
+					errx(1,
+					     "failed to alloc cpu from affinity list %s, err=%d",
+					     opt.cpu_dst_wrk_affinity, dst_cpu);
+
+				if (dst_cpu == (int)id->remote.cpu || dst_cpu == (int)id->local.cpu) {
+					dbg("skipping cpu %d remote %d, local %d\n",
+					    dst_cpu, id->remote.cpu, id->local.cpu);
+					continue;
+				}
+
+				break;
+			}
+
+			dst_wrk_cpu[i] = dst_cpu;
+		} else if (opt.cpu_dst_wrk != -1) {
 			dst_wrk_cpu[i] = opt.cpu_dst_wrk;
-		else
+		} else {
 			dst_wrk_cpu[i] = id->remote.cpu + opt.pin_off;
+		}
 
 		if (spawn_worker(src, src_wrk_cpu[i], &src_wrk_id[i]) ||
 		    spawn_worker(dst, dst_wrk_cpu[i], &dst_wrk_id[i]))

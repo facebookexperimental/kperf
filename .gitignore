@@ -2,5 +2,6 @@
 *.o
 bipartite_match
 client
+cpu_affinity
 cpu_stat
 server
