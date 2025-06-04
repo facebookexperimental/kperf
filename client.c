@@ -688,6 +688,24 @@ int main(int argc, char *argv[])
 			errx(1, "Cross-pin only works with 2 connections");
 	}
 
+	if (opt.msg_trunc && opt.validate)
+		errx(1, "--msg-trunc and --validate yes are mutually exclusive");
+
+	if (opt.msg_trunc && opt.devmem_rx)
+		errx(1, "--msg-trunc and --devmem-rx are mutually exclusive");
+
+	if (opt.msg_trunc)
+		rx_mode = KPM_RX_MODE_SOCKET_TRUNC;
+	else if (opt.devmem_rx)
+		rx_mode = KPM_RX_MODE_DEVMEM;
+
+	/* TODO: support --validate yes for cuda rx */
+	if (opt.validate && opt.devmem_rx_memory == MEMORY_PROVIDER_CUDA)
+		errx(1, "--devmem-rx-memory cuda does not support --validate yes");
+
+	if (opt.msg_zerocopy)
+		tx_mode = KPM_TX_MODE_SOCKET_ZEROCOPY;
+
 	src_wrk_id = calloc(opt.n_conns, sizeof(*src_wrk_id));
 	dst_wrk_id = calloc(opt.n_conns, sizeof(*dst_wrk_id));
 	src_wrk_cpu = calloc(opt.n_conns, sizeof(*src_wrk_cpu));
@@ -725,24 +743,6 @@ int main(int argc, char *argv[])
 		warnx("Failed create TCP acceptor");
 		goto out;
 	}
-
-	if (opt.msg_trunc && opt.validate)
-		errx(1, "--msg-trunc and --validate yes are mutually exclusive");
-
-	if (opt.msg_trunc && opt.devmem_rx)
-		errx(1, "--msg-trunc and --devmem-rx are mutually exclusive");
-
-	if (opt.msg_trunc)
-		rx_mode = KPM_RX_MODE_SOCKET_TRUNC;
-	else if (opt.devmem_rx)
-		rx_mode = KPM_RX_MODE_DEVMEM;
-
-	/* TODO: support --validate yes for cuda rx */
-	if (opt.validate && opt.devmem_rx_memory == MEMORY_PROVIDER_CUDA)
-		errx(1, "--devmem-rx-memory cuda does not support --validate yes");
-
-	if (opt.msg_zerocopy)
-		tx_mode = KPM_TX_MODE_SOCKET_ZEROCOPY;
 
 	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.dmabuf_size_mb,
 			 opt.num_rx_queues, opt.validate,
