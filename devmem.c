@@ -650,7 +650,9 @@ static struct memory_provider *get_memory_provider(enum memory_provider_type pro
 
 /* Setup Devmem RX */
 int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t udmabuf_size_mb, int num_queues)
+		 size_t udmabuf_size_mb, int num_queues,
+		 enum memory_provider_type provider,
+		 struct pci_dev *dev)
 {
 	struct netdev_queue_id *queues;
 	char ifname[IFNAMSIZ] = {};
@@ -672,6 +674,10 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		warn("Failed to query socket address");
 		return -1;
 	}
+
+	rxmp = get_memory_provider(provider);
+	if (!rxmp)
+		return -1;
 
 	if (addr.sin6_family == AF_INET)
 		inet_to_inet6((void *)&addr, &addr);
@@ -695,9 +701,14 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		goto sock_destroy;
 	}
 
+	if (rxmp->dev_init && rxmp->dev_init(dev) < 0) {
+		ret = -1;
+		goto sock_destroy;
+	}
+
 	devmem->mem = rxmp->alloc(udmabuf_size_mb * 1024 * 1024);
 	if (!devmem->mem) {
-		warnx("Failed to allocate udmabuf");
+		warnx("Failed to allocate memory");
 		ret = -1;
 		goto sock_destroy;
 	}
@@ -706,7 +717,7 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		warnx("Invalid number of RX queues (%u) requested (max: %u)",
 		      num_queues, rxqn - 1);
 		ret = -1;
-		goto free_udmabuf;
+		goto free_memory;
 	}
 
 	max_kernel_queue = rxqn - num_queues;
@@ -715,7 +726,7 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 	if (rss_equal(ifname, max_kernel_queue)) {
 		warnx("Failed to setup RSS");
 		ret = -1;
-		goto free_udmabuf;
+		goto free_memory;
 	}
 
 	memcpy(devmem->ifname, ifname, IFNAMSIZ);
@@ -756,7 +767,7 @@ undo_rss_context:
 	rss_context_delete(devmem);
 undo_rss:
 	rss_equal(ifname, rxqn);
-free_udmabuf:
+free_memory:
 	rxmp->free(devmem->mem);
 sock_destroy:
 	ynl_sock_destroy(devmem->ys);
@@ -780,7 +791,8 @@ int devmem_teardown(struct session_state_devmem *devmem)
 	}
 	if (devmem->ys)
 		ynl_sock_destroy(devmem->ys);
-	rxmp->free(devmem->mem);
+	if (rxmp)
+		rxmp->free(devmem->mem);
 	return 0;
 }
 
@@ -822,6 +834,7 @@ static int devmem_validate_token(struct memory_buffer *mem,
 	ioctl(mem->fd, DMA_BUF_IOCTL_SYNC, &sync);
 
 	pat = &patbuf[start];
+	/* TODO: memory_provider for CUDA case? */
 	ret = memcmp(pat, mem->buf_mem + dmabuf_cmsg->frag_offset, dmabuf_cmsg->frag_size);
 
 	sync.flags = DMA_BUF_SYNC_END;
