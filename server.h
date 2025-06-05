@@ -15,6 +15,10 @@
 
 #include "proto.h"
 
+#ifdef USE_CUDA
+#include <cuda.h>
+#endif
+
 #define PATTERN_PERIOD 255
 
 struct server_session {
@@ -43,6 +47,12 @@ struct dmabuf_token {
 };
 #endif
 
+#ifdef USE_CUDA
+struct memory_buffer_cuda {
+	CUcontext ctx;
+};
+#endif
+
 struct memory_buffer {
 	char *buf_mem;
 	size_t size;
@@ -50,6 +60,10 @@ struct memory_buffer {
 	int devfd;
 	int memfd;
 	int dmabuf_id;
+	void *priv;
+#ifdef USE_CUDA
+	struct memory_buffer_cuda cuda;
+#endif
 };
 
 struct memory_provider {
@@ -87,7 +101,8 @@ void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx
                            struct memory_buffer *devmem, bool validate);
 
 int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t udmabuf_size, int num_queues);
+		 size_t udmabuf_size, int num_queues,
+		 enum memory_provider_type provider, struct pci_dev *dev);
 int devmem_teardown(struct session_state_devmem *devmem);
 int devmem_release_tokens(int fd, struct connection_devmem *conn);
 ssize_t devmem_recv(int fd, struct connection_devmem *conn,

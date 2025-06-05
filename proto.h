@@ -133,6 +133,11 @@ enum kpm_tx_mode {
 	KPM_TX_MODE_SOCKET_ZEROCOPY,
 };
 
+enum memory_provider_type {
+	MEMORY_PROVIDER_HOST,
+	MEMORY_PROVIDER_CUDA,
+};
+
 #define DEVICE_DOMAIN_ANY 0xffff
 #define DEVICE_BUS_ANY 0xff
 #define DEVICE_DEVICE_ANY 0xff
@@ -147,8 +152,13 @@ struct kpm_mode {
 	struct kpm_header hdr;
 	enum kpm_rx_mode rx_mode;
 	enum kpm_tx_mode tx_mode;
+
+	/* devmem info */
+	enum memory_provider_type rx_provider;
+	struct pci_dev dev;
 	__u32 udmabuf_size_mb;
 	__u32 num_rx_queues;
+
 	__u8 validate;
 };
 
@@ -284,7 +294,9 @@ int kpm_send_tls(int fd, __u32 conn_id, __u32 dir_mask,
 int kpm_send_max_pacing(int fd, __u32 id, __u32 max_pace);
 int kpm_send_tcp_cc(int fd, __u32 id, char *cc_name);
 int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
-		  __u32 udmabuf_size_mb, __u32 num_rx_queues, __u8 validate);
+		  __u32 udmabuf_size_mb, __u32 num_rx_queues, __u8 validate,
+		  enum memory_provider_type rx_provider,
+		  struct pci_dev *dev);
 int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu);
 
 void kpm_reply_error(int fd, struct kpm_header *hdr, __u16 error);
@@ -308,7 +320,9 @@ int kpm_req_tls(int fd, __u32 conn_id, __u32 dir_mask,
 int kpm_req_pacing(int fd, __u32 conn_id, __u32 max_pace);
 int kpm_req_tcp_cc(int fd, __u32 conn_id, char *cc_name);
 int kpm_req_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
-		 __u32 udmabuf_size_mb, __u32 num_rx_queues, __u8 validate);
+		 __u32 udmabuf_size_mb, __u32 num_rx_queues, __u8 validate,
+		 enum memory_provider_type rx_provider,
+		 struct pci_dev *dev);
 int kpm_req_disconnect(int fd, __u32 connection_id);
 
 #endif /* PROTO_H */
