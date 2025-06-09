@@ -652,7 +652,6 @@ int main(int argc, char *argv[])
 	__u32 *src_wrk_id, *dst_wrk_id;
 	struct sockaddr_in6 conn_addr;
 	__u32 src_tst_id, dst_tst_id;
-	struct pci_dev dst_dev;
 	struct addrinfo *addr;
 	struct kpm_test *test;
 	unsigned int i;
@@ -746,14 +745,14 @@ int main(int argc, char *argv[])
 
 	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.dmabuf_size_mb,
 			 opt.num_rx_queues, opt.validate,
-			 opt.devmem_rx_memory, &dst_dev) < 0) {
+			 opt.devmem_rx_memory, &opt.devmem_dst_dev) < 0) {
 		warnx("Failed setup destination mode");
 		goto out;
 	}
 
 	if (kpm_req_mode(src, rx_mode, tx_mode, opt.dmabuf_size_mb,
 			 opt.num_rx_queues, opt.validate,
-			 opt.devmem_rx_memory, &dst_dev) < 0) {
+			 opt.devmem_rx_memory, &opt.devmem_dst_dev) < 0) {
 		warnx("Failed setup source mode");
 		goto out;
 	}
