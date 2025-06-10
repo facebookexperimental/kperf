@@ -156,6 +156,7 @@ struct kpm_mode {
 
 	/* devmem info */
 	enum memory_provider_type rx_provider;
+	enum memory_provider_type tx_provider;
 	struct pci_dev dev;
 	__u32 dmabuf_rx_size_mb;
 	__u32 dmabuf_tx_size_mb;
@@ -300,6 +301,7 @@ int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
 		  __u32 dmabuf_rx_size_mb, __u32 dmabuf_tx_size_mb,
 		  __u32 num_rx_queues, __u8 validate,
 		  enum memory_provider_type rx_provider,
+		  enum memory_provider_type tx_provider,
 		  struct pci_dev *dev, struct sockaddr_in6 *addr);
 int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu);
 
@@ -327,6 +329,7 @@ int kpm_req_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
 		 __u32 dmabuf_rx_size_mb, __u32 dmabuf_tx_size_mb,
 		 __u32 num_rx_queues, __u8 validate,
 		 enum memory_provider_type rx_provider,
+		 enum memory_provider_type tx_provider,
 		 struct pci_dev *dev, struct sockaddr_in6 *addr);
 int kpm_req_disconnect(int fd, __u32 connection_id);
 

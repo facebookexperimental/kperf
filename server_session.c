@@ -537,7 +537,7 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	self->validate = req->validate;
 
 	if (!self->tcp_sock && (req->tx_mode == KPM_TX_MODE_DEVMEM)) {
-		self->devmem.tx_provider = MEMORY_PROVIDER_HOST;
+		self->devmem.tx_provider = req->tx_provider;
 		self->devmem.dmabuf_tx_size_mb = req->dmabuf_tx_size_mb;
 		memcpy(&self->devmem.tx_dev, &req->dev, sizeof(self->devmem.tx_dev));
 		memcpy(&self->devmem.addr, &req->addr, sizeof(self->devmem.addr));
