@@ -650,7 +650,7 @@ static struct memory_provider *get_memory_provider(enum memory_provider_type pro
 
 /* Setup Devmem RX */
 int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t dmabuf_size_mb, int num_queues,
+		 size_t dmabuf_rx_size_mb, int num_queues,
 		 enum memory_provider_type provider,
 		 struct pci_dev *dev)
 {
@@ -706,7 +706,7 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		goto sock_destroy;
 	}
 
-	devmem->mem = rxmp->alloc(dmabuf_size_mb * 1024 * 1024);
+	devmem->mem = rxmp->alloc(dmabuf_rx_size_mb * 1024 * 1024);
 	if (!devmem->mem) {
 		warnx("Failed to allocate memory");
 		ret = -1;
