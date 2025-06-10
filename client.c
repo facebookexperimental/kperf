@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
@@ -27,6 +28,7 @@ static struct {
 	bool devmem_rx;
 	enum memory_provider_type devmem_rx_memory;
 	struct pci_dev devmem_dst_dev;
+	bool devmem_tx;
 	bool msg_zerocopy;
 	bool tls;
 	bool tls_rx;
@@ -56,6 +58,7 @@ static struct {
 	unsigned int max_pace;
 	char *tcp_cong_ctrl;
 	unsigned int dmabuf_rx_size_mb;
+	unsigned int dmabuf_tx_size_mb;
 	unsigned int num_rx_queues;
 	bool validate;
 } opt = {
@@ -75,6 +78,7 @@ static struct {
 	.n_conns = 1,
 	/* 128M is enough to drive one queue at 200G */
 	.dmabuf_rx_size_mb = 128,
+	.dmabuf_tx_size_mb = 128,
 	.num_rx_queues = 1,
 	.devmem_rx_memory = MEMORY_PROVIDER_HOST,
 	.devmem_dst_dev = {
@@ -243,6 +247,9 @@ static const struct opt_table opts[] = {
 		     "Select the memory provider for TCP Devmem RX"),
 	OPT_WITH_ARG("--dmabuf-rx-size-mb <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.dmabuf_rx_size_mb, "Size of RX dmabuf for TCP Devmem mode"),
+	OPT_WITH_ARG("--dmabuf-tx-size-mb <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.dmabuf_tx_size_mb, "Size of TX dmabuf for TCP Devmem mode"),
+	OPT_WITHOUT_ARG("--devmem-tx", opt_set_bool, &opt.devmem_tx, "Use TCP Devmem on transmit"),
 	OPT_WITH_ARG("--num-rx-queues <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.num_rx_queues, "Number of RX queues for TCP Devmem mode"),
 	OPT_WITH_ARG("--validate <yes|no>", opt_set_bool_arg, NULL, &opt.validate,
@@ -640,6 +647,38 @@ dump_result_machine(struct kpm_test_results *result, const char *dir,
 	printf(local ? "," : "\n");
 }
 
+/* copied from devmem.c */
+static void inet_to_inet6(struct sockaddr *addr, struct sockaddr_in6 *out)
+{
+	out->sin6_addr.s6_addr32[3] = ((struct sockaddr_in6 *)addr)->sin6_addr.s6_addr32[0];
+	out->sin6_addr.s6_addr32[0] = 0;
+	out->sin6_addr.s6_addr32[1] = 0;
+	out->sin6_addr.s6_addr16[4] = 0;
+	out->sin6_addr.s6_addr16[5] = 0xffff;
+	out->sin6_family = AF_INET6;
+}
+
+int inet_sockaddr(const char *str, struct sockaddr_in6 *out)
+{
+	struct sockaddr_in *sa4;
+	struct sockaddr_in6 tmp;
+
+	out->sin6_family = AF_INET6;
+	if (inet_pton(AF_INET6, str, &(out->sin6_addr)) == 1) {
+		out->sin6_family = AF_INET6;
+		return 0;
+	}
+
+	sa4 = (struct sockaddr_in *)&tmp;
+	if (inet_pton(AF_INET, str, &(sa4->sin_addr)) == 1) {
+		sa4->sin_family = AF_INET;
+		inet_to_inet6((void *)sa4, out);
+		return 0;
+	}
+
+	return -1;
+}
+
 int main(int argc, char *argv[])
 {
 	enum kpm_rx_mode rx_mode = KPM_RX_MODE_SOCKET;
@@ -652,6 +691,7 @@ int main(int argc, char *argv[])
 	__u32 *src_wrk_id, *dst_wrk_id;
 	struct sockaddr_in6 conn_addr;
 	__u32 src_tst_id, dst_tst_id;
+	struct sockaddr_in6 src_addr;
 	struct addrinfo *addr;
 	struct kpm_test *test;
 	unsigned int i;
@@ -687,6 +727,9 @@ int main(int argc, char *argv[])
 			errx(1, "Cross-pin only works with 2 connections");
 	}
 
+	if (inet_sockaddr(opt.src, &src_addr) < 0)
+		errx(1, "failed to get sockaddr from %s\n", opt.src);
+
 	if (opt.msg_trunc && opt.validate)
 		errx(1, "--msg-trunc and --validate yes are mutually exclusive");
 
@@ -702,8 +745,13 @@ int main(int argc, char *argv[])
 	if (opt.validate && opt.devmem_rx_memory == MEMORY_PROVIDER_CUDA)
 		errx(1, "--devmem-rx-memory cuda does not support --validate yes");
 
+	if (opt.msg_zerocopy && opt.devmem_tx)
+		errx(1, "--msg-zerocopy and --devmem-tx are mutually exclusive");
+
 	if (opt.msg_zerocopy)
 		tx_mode = KPM_TX_MODE_SOCKET_ZEROCOPY;
+	else if (opt.devmem_tx)
+		tx_mode = KPM_TX_MODE_DEVMEM;
 
 	src_wrk_id = calloc(opt.n_conns, sizeof(*src_wrk_id));
 	dst_wrk_id = calloc(opt.n_conns, sizeof(*dst_wrk_id));
@@ -744,15 +792,15 @@ int main(int argc, char *argv[])
 	}
 
 	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.dmabuf_rx_size_mb,
-			 opt.num_rx_queues, opt.validate,
-			 opt.devmem_rx_memory, &opt.devmem_dst_dev) < 0) {
+			 opt.dmabuf_tx_size_mb, opt.num_rx_queues, opt.validate,
+			 opt.devmem_rx_memory, &opt.devmem_dst_dev, NULL) < 0) {
 		warnx("Failed setup destination mode");
 		goto out;
 	}
 
 	if (kpm_req_mode(src, rx_mode, tx_mode, opt.dmabuf_rx_size_mb,
-			 opt.num_rx_queues, opt.validate,
-			 opt.devmem_rx_memory, NULL) < 0) {
+			 opt.dmabuf_tx_size_mb, opt.num_rx_queues, opt.validate,
+			 opt.devmem_rx_memory, NULL, &src_addr) < 0) {
 		warnx("Failed setup source mode");
 		goto out;
 	}
