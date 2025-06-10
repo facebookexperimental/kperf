@@ -473,7 +473,7 @@ static struct memory_provider udmabuf_memory_provider = {
 	.memcpy_to_device = udmabuf_memcpy_to_device,
 };
 
-static struct memory_provider *rxmp = &udmabuf_memory_provider;
+static struct memory_provider *rxmp;
 
 #ifdef USE_CUDA
 
