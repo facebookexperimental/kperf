@@ -304,6 +304,47 @@ out:
 	return ret;
 }
 
+static int bind_tx_queue(unsigned int ifindex, unsigned int dmabuf_fd,
+			 struct ynl_sock *ys)
+{
+	struct netdev_bind_tx_req *req = NULL;
+	struct netdev_bind_tx_rsp *rsp = NULL;
+	int ret;
+
+	req = netdev_bind_tx_req_alloc();
+	if (!req) {
+		warnx("netdev_bind_tx_req_alloc() failed");
+		return -1;
+	}
+	netdev_bind_tx_req_set_ifindex(req, ifindex);
+	netdev_bind_tx_req_set_fd(req, dmabuf_fd);
+
+	rsp = netdev_bind_tx(ys, req);
+	if (!rsp) {
+		warnx("netdev_bind_tx");
+		ret = -1;
+		goto free_req;
+	}
+
+	if (!rsp->_present.id) {
+		warnx("id not present");
+		ret = -1;
+		goto free_rsp;
+	}
+
+	ret = rsp->id;
+	netdev_bind_tx_req_free(req);
+	netdev_bind_tx_rsp_free(rsp);
+
+	return ret;
+
+free_rsp:
+	netdev_bind_tx_rsp_free(rsp);
+free_req:
+	netdev_bind_tx_req_free(req);
+	return ret;
+}
+
 #define UDMABUF_LIMIT_PATH "/sys/module/udmabuf/parameters/size_limit_mb"
 
 static int udmabuf_check_size(size_t size_mb)
@@ -474,6 +515,7 @@ static struct memory_provider udmabuf_memory_provider = {
 };
 
 static struct memory_provider *rxmp;
+static struct memory_provider *txmp;
 
 #ifdef USE_CUDA
 
@@ -928,4 +970,95 @@ ssize_t devmem_recv(int fd, struct connection_devmem *conn,
 	}
 
 	return n;
+}
+
+int devmem_sendmsg(int fd, int dmabuf_id, size_t off, size_t n)
+{
+	char ctrl_data[CMSG_SPACE(sizeof(int))];
+	struct msghdr msg = { 0 };
+	struct cmsghdr *cmsg;
+	struct iovec iov;
+
+	iov.iov_base = (void *)off;
+	iov.iov_len = n;
+
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+
+	msg.msg_control = ctrl_data;
+	msg.msg_controllen = sizeof(ctrl_data);
+
+	cmsg = CMSG_FIRSTHDR(&msg);
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type = SCM_DEVMEM_DMABUF;
+	cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+	*((int *)CMSG_DATA(cmsg)) = dmabuf_id;
+
+	return sendmsg(fd, &msg, MSG_ZEROCOPY);
+}
+
+int devmem_setup_tx(struct session_state_devmem *devmem, int fd)
+{
+	char ifname[IFNAMSIZ] = {};
+	struct ynl_error yerr;
+	int ifindex;
+	int ret;
+
+	txmp = get_memory_provider(devmem->tx_provider);
+	if (!txmp)
+		return -1;
+
+	if (txmp->dev_init && txmp->dev_init(&devmem->tx_dev) < 0)
+		return -1;
+
+	devmem->tx_mem = txmp->alloc(devmem->dmabuf_tx_size_mb * 1024 * 1024);
+	if (!devmem->tx_mem) {
+		warnx("Failed to allocate devmem tx buffer");
+		return -1;
+	}
+
+	txmp->memcpy_to_device(devmem->tx_mem, 0, patbuf, sizeof(patbuf));
+
+	ifindex = find_iface(&devmem->addr, ifname);
+	if (ifindex < 0) {
+		warnx("Failed to resolve ifindex: %s", strerror(-ifindex));
+		return -1;
+	}
+
+	devmem->ys = ynl_sock_create(&ynl_netdev_family, &yerr);
+	if (!devmem->ys) {
+		warnx("Failed to setup YNL socket: %s", yerr.msg);
+		return -1;
+	}
+
+	devmem->tx_mem->dmabuf_id = bind_tx_queue(ifindex, devmem->tx_mem->fd, devmem->ys);
+	if (devmem->tx_mem->dmabuf_id < 0) {
+		warnx("Failed to bind TX queue dmabuf: %d\n", devmem->tx_mem->dmabuf_id);
+		ret = -1;
+		goto sock_destroy;
+	}
+
+	if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, ifname, IFNAMSIZ)) {
+		warn("failed to bind device to socket");
+		ret = -1;
+		goto sock_destroy;
+	}
+
+	return 0;
+
+sock_destroy:
+	ynl_sock_destroy(devmem->ys);
+	devmem->ys = NULL;
+	return ret;
+}
+
+void devmem_teardown_tx(struct session_state_devmem *devmem)
+{
+	if (txmp)
+		txmp->free(devmem->tx_mem);
+
+	if (devmem->ys) {
+		ynl_sock_destroy(devmem->ys);
+		devmem->ys = NULL;
+	}
 }

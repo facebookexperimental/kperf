@@ -181,21 +181,26 @@ int kpm_send_tcp_cc(int fd, __u32 id, char *cc_name)
 }
 
 int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
-		  __u32 dmabuf_rx_size_mb, __u32 num_rx_queues, __u8 validate,
+		  __u32 dmabuf_rx_size_mb, __u32 dmabuf_tx_size_mb,
+		  __u32 num_rx_queues, __u8 validate,
 		  enum memory_provider_type rx_provider,
-		  struct pci_dev *dev)
+		  struct pci_dev *dev, struct sockaddr_in6 *addr)
 {
 	struct kpm_mode msg = {};
 
 	msg.rx_mode = rx_mode;
 	msg.tx_mode = tx_mode;
 	msg.dmabuf_rx_size_mb = dmabuf_rx_size_mb;
+	msg.dmabuf_tx_size_mb = dmabuf_tx_size_mb;
 	msg.num_rx_queues = num_rx_queues;
 	msg.validate = validate;
 	msg.rx_provider = rx_provider;
 
 	if (dev)
 		memcpy(&msg.dev, dev, sizeof(msg.dev));
+
+	if (addr)
+		memcpy(&msg.addr, addr, sizeof(msg.addr));
 
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_MODE);
 }
@@ -465,15 +470,17 @@ kpm_req_tcp_cc(int fd, __u32 conn_id, char *cc_name)
 
 int
 kpm_req_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
-	     __u32 dmabuf_rx_size_mb, __u32 num_rx_queues, __u8 validate,
+	     __u32 dmabuf_rx_size_mb, __u32 dmabuf_tx_size_mb,
+	     __u32 num_rx_queues, __u8 validate,
 	     enum memory_provider_type rx_provider,
-	     struct pci_dev *dev)
+	     struct pci_dev *dev, struct sockaddr_in6 *addr)
 {
 	struct kpm_empty *repl;
 	int id;
 
-	id = kpm_send_mode(fd, rx_mode, tx_mode, dmabuf_rx_size_mb, num_rx_queues, validate,
-			   rx_provider, dev);
+	id = kpm_send_mode(fd, rx_mode, tx_mode, dmabuf_rx_size_mb, dmabuf_tx_size_mb,
+			   num_rx_queues, validate, rx_provider, dev,
+			   addr);
 	if (id < 0) {
 		warnx("Failed to request mode");
 		return id;

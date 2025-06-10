@@ -324,7 +324,7 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 		else
 			conn->to_recv = len;
 
-		zc = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY;
+		zc = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY || self->tx_mode == KPM_TX_MODE_DEVMEM;
 		if (setsockopt(conn->fd, SOL_SOCKET, SO_ZEROCOPY, &zc, sizeof(zc))) {
 			warnx("Failed to set SO_ZEROCOPY");
 			self->quit = 1;
@@ -575,16 +575,23 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 		   unsigned int events)
 {
 	unsigned int rep = max_t(int, 10, conn->to_send / conn->write_size + 1);
-	bool msg_zerocopy = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY;
+	bool msg_zerocopy = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY || self->tx_mode == KPM_TX_MODE_DEVMEM;
 	int flags = msg_zerocopy ? MSG_ZEROCOPY : 0;
 
 	while (rep--) {
-		void *src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
 		size_t chunk;
+		void *src;
 		ssize_t n;
 
 		chunk = min_t(size_t, conn->write_size, conn->to_send);
-		n = send(conn->fd, src, chunk, MSG_DONTWAIT | flags);
+
+		if (self->tx_mode == KPM_TX_MODE_DEVMEM) {
+			n = devmem_sendmsg(conn->fd, self->devmem.dmabuf_id,
+					   conn->tot_sent % PATTERN_PERIOD, chunk);
+		} else {
+			src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
+			n = send(conn->fd, src, chunk, MSG_DONTWAIT | flags);
+		}
 		if (n == 0) {
 			warnx("zero send chunk:%zd to_send:%lld to_recv:%lld",
 			      chunk, conn->to_send, conn->to_recv);
@@ -723,14 +730,14 @@ worker_handle_conn(struct worker_state *self, int fd, unsigned int events)
 /* == Main loop == */
 
 void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
-			   struct memory_buffer *devmem, bool validate)
+			   struct memory_buffer *devmem, bool validate, int dmabuf_id)
 {
 	struct worker_state self = {
 		.main_sock = fd,
 		.rx_mode = rx_mode,
 		.tx_mode = tx_mode,
 		.validate = validate,
-		.devmem = { .mem = devmem },
+		.devmem = { .mem = devmem, .dmabuf_id = dmabuf_id },
 	};
 	struct epoll_event ev, events[32];
 	int i, nfds;

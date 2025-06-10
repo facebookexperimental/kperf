@@ -246,6 +246,14 @@ server_msg_connect(struct session_state *self, struct kpm_header *hdr)
 		goto err_close;
 	}
 
+	if (self->tx_mode == KPM_TX_MODE_DEVMEM) {
+		if (devmem_setup_tx(&self->devmem, cfd) < 0) {
+			warnx("Failed to setup devmem TX");
+			goto err_close;
+		}
+
+	}
+
 	ret = connect(cfd, (void *)&req->addr, req->len);
 	if (ret < 0) {
 		warn("Failed to connect");
@@ -528,6 +536,13 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	self->tx_mode = req->tx_mode;
 	self->validate = req->validate;
 
+	if (!self->tcp_sock && (req->tx_mode == KPM_TX_MODE_DEVMEM)) {
+		self->devmem.tx_provider = MEMORY_PROVIDER_HOST;
+		self->devmem.dmabuf_tx_size_mb = req->dmabuf_tx_size_mb;
+		memcpy(&self->devmem.tx_dev, &req->dev, sizeof(self->devmem.tx_dev));
+		memcpy(&self->devmem.addr, &req->addr, sizeof(self->devmem.addr));
+	}
+
 	if (kpm_reply_empty(self->main_sock, hdr) < 1) {
 		warnx("Reply failed");
 		goto err_quit;
@@ -562,9 +577,11 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 		goto err_free;
 	}
 	if (!pwrk->pid) {
+		int dmabuf_id = self->devmem.tx_mem ? self->devmem.tx_mem->dmabuf_id : -1;
+
 		close(p[0]);
 		pworker_main(p[1], self->rx_mode, self->tx_mode, self->devmem.mem,
-			     self->validate);
+			     self->validate, dmabuf_id);
 		exit(1);
 	}
 
@@ -1034,6 +1051,8 @@ static void server_session_loop(int fd)
 	}
 	if (self.tcp_sock && self.rx_mode == KPM_RX_MODE_DEVMEM)
 		devmem_teardown(&self.devmem);
+	if (!self.tcp_sock && self.tx_mode == KPM_TX_MODE_DEVMEM)
+		devmem_teardown_tx(&self.devmem);
 }
 
 static NORETURN void server_session(int fd)
