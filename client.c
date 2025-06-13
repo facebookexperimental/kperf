@@ -752,7 +752,7 @@ int main(int argc, char *argv[])
 
 	if (kpm_req_mode(src, rx_mode, tx_mode, opt.dmabuf_rx_size_mb,
 			 opt.num_rx_queues, opt.validate,
-			 opt.devmem_rx_memory, &opt.devmem_dst_dev) < 0) {
+			 opt.devmem_rx_memory, NULL) < 0) {
 		warnx("Failed setup source mode");
 		goto out;
 	}
