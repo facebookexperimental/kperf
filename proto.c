@@ -194,7 +194,8 @@ int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
 	msg.validate = validate;
 	msg.rx_provider = rx_provider;
 
-	memcpy(&msg.dev, dev, sizeof(msg.dev));
+	if (dev)
+		memcpy(&msg.dev, dev, sizeof(msg.dev));
 
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_MODE);
 }
