@@ -997,12 +997,37 @@ int devmem_sendmsg(int fd, int dmabuf_id, size_t off, size_t n)
 	return sendmsg(fd, &msg, MSG_ZEROCOPY);
 }
 
-int devmem_setup_tx(struct session_state_devmem *devmem, int fd)
+int devmem_bind_socket(struct session_state_devmem *devmem, int fd)
+{
+	char ifname[IFNAMSIZ] = {};
+	int ifindex;
+
+	ifindex = find_iface(&devmem->addr, ifname);
+	if (ifindex < 0) {
+		warnx("Failed to resolve ifindex: %s", strerror(-ifindex));
+		return -1;
+	}
+
+	if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, ifname, IFNAMSIZ)) {
+		warn("failed to bind device to socket");
+		return -1;
+	}
+
+	return 0;
+}
+
+int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_type provider,
+		    int dmabuf_tx_size_mb, struct pci_dev *dev, struct sockaddr_in6 *addr)
 {
 	char ifname[IFNAMSIZ] = {};
 	struct ynl_error yerr;
 	int ifindex;
 	int ret;
+
+	devmem->tx_provider = provider;
+	devmem->dmabuf_tx_size_mb = dmabuf_tx_size_mb;
+	memcpy(&devmem->tx_dev, dev, sizeof(devmem->tx_dev));
+	memcpy(&devmem->addr, addr, sizeof(devmem->addr));
 
 	txmp = get_memory_provider(devmem->tx_provider);
 	if (!txmp)
@@ -1038,11 +1063,6 @@ int devmem_setup_tx(struct session_state_devmem *devmem, int fd)
 		goto sock_destroy;
 	}
 
-	if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, ifname, IFNAMSIZ)) {
-		warn("failed to bind device to socket");
-		ret = -1;
-		goto sock_destroy;
-	}
 
 	return 0;
 

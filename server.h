@@ -123,6 +123,7 @@ ssize_t devmem_recv(int fd, struct connection_devmem *conn,
 int devmem_sendmsg(int fd, int dmabuf_id, size_t off, size_t n);
 void devmem_teardown_conn(struct connection_devmem *devmem);
 int devmem_prepare_connect(int fd, struct sockaddr_in6 *src, struct session_state_devmem *devmem);
-
-int devmem_setup_tx(struct session_state_devmem *devmem, int fd);
+int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_type provider,
+		    int dmabuf_tx_size_mb, struct pci_dev *dev, struct sockaddr_in6 *addr);
+int devmem_bind_socket(struct session_state_devmem *devmem, int fd);
 #endif /* SERVER_H */
