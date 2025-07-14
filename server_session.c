@@ -246,13 +246,9 @@ server_msg_connect(struct session_state *self, struct kpm_header *hdr)
 		goto err_close;
 	}
 
-	if (self->tx_mode == KPM_TX_MODE_DEVMEM) {
-		if (devmem_setup_tx(&self->devmem, cfd) < 0) {
-			warnx("Failed to setup devmem TX");
-			goto err_close;
-		}
-
-	}
+	if (self->tx_mode == KPM_TX_MODE_DEVMEM &&
+	    devmem_bind_socket(&self->devmem, cfd) < 0)
+		goto err_close;
 
 	ret = connect(cfd, (void *)&req->addr, req->len);
 	if (ret < 0) {
@@ -537,10 +533,13 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	self->validate = req->validate;
 
 	if (!self->tcp_sock && (req->tx_mode == KPM_TX_MODE_DEVMEM)) {
-		self->devmem.tx_provider = req->tx_provider;
-		self->devmem.dmabuf_tx_size_mb = req->dmabuf_tx_size_mb;
-		memcpy(&self->devmem.tx_dev, &req->dev, sizeof(self->devmem.tx_dev));
-		memcpy(&self->devmem.addr, &req->addr, sizeof(self->devmem.addr));
+		ret = devmem_setup_tx(&self->devmem, req->tx_provider, req->dmabuf_tx_size_mb,
+				      &req->dev, &req->addr);
+		if (ret < 0) {
+			warnx("Failed to setup devmem tx");
+			self->quit = 1;
+			return;
+		}
 	}
 
 	if (kpm_reply_empty(self->main_sock, hdr) < 1) {
