@@ -1054,8 +1054,10 @@ sock_destroy:
 
 void devmem_teardown_tx(struct session_state_devmem *devmem)
 {
-	if (txmp)
+	if (txmp && devmem->tx_mem) {
 		txmp->free(devmem->tx_mem);
+		devmem->tx_mem = NULL;
+	}
 
 	if (devmem->ys) {
 		ynl_sock_destroy(devmem->ys);
