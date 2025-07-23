@@ -4,3 +4,6 @@
 [submodule "ynl-c"]
 	path = ynl-c
 	url = https://github.com/linux-netdev/ynl-c.git
+[submodule "liburing"]
+	path = liburing
+	url = https://github.com/axboe/liburing.git
