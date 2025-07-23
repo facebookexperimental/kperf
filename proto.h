@@ -63,6 +63,11 @@ struct __kpm_generic_u16 {
 	__u16 pad;
 };
 
+struct kpm_tcp_acceptor {
+	struct kpm_header hdr;
+	__u16 port;
+};
+
 struct kpm_tcp_acceptor_reply {
 	struct kpm_header hdr;
 	socklen_t len;
@@ -291,6 +296,7 @@ int kpm_send_empty(int fd, enum kpm_msg_type type);
 int kpm_send_u32(int fd, enum kpm_msg_type type, __u32 arg);
 
 int kpm_send_conn_id(int fd, __u32 id, __u32 cpu);
+int kpm_send_tcp_acceptor(int fd, __u16 port);
 int kpm_send_connect(int fd, struct sockaddr_in6 *addr, socklen_t len,
 		     __u32 mss);
 int kpm_send_tls(int fd, __u32 conn_id, __u32 dir_mask,
@@ -319,7 +325,7 @@ int kpm_reply_connect(int fd, struct kpm_header *hdr,
 
 int kpm_xchg_hello(int fd, unsigned int *ncpus);
 
-int kpm_req_tcp_sock(int fd, struct sockaddr_in6 *addr, socklen_t *len);
+int kpm_req_tcp_sock(int fd, unsigned int port, struct sockaddr_in6 *addr, socklen_t *len);
 int kpm_req_end_test(int fd, __u32 test_id);
 int kpm_req_tls(int fd, __u32 conn_id, __u32 dir_mask,
 		void *info, socklen_t len);

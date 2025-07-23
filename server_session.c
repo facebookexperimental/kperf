@@ -145,17 +145,24 @@ err_close:
 }
 
 static void
-server_msg_tcp_acceptor(struct session_state *self, struct kpm_header *req)
+server_msg_tcp_acceptor(struct session_state *self, struct kpm_header *hdr)
 {
+	struct kpm_tcp_acceptor *req;
 	struct epoll_event ev = {};
 	struct sockaddr_in6 addr;
 	socklen_t len;
 	int ret;
 
 	if (self->tcp_sock) {
-		kpm_reply_error(self->main_sock, req, EBUSY);
+		kpm_reply_error(self->main_sock, hdr, EBUSY);
 		return;
 	}
+	if (hdr->len < sizeof(struct kpm_tcp_acceptor)) {
+		warn("Invalid request in %s", __func__);
+		self->quit = 1;
+		return;
+	}
+	req = (void *)hdr;
 
 	len = sizeof(addr);
 	if (getsockname(self->main_sock, (void *)&addr, &len)) {
@@ -163,7 +170,7 @@ server_msg_tcp_acceptor(struct session_state *self, struct kpm_header *req)
 		self->quit = 1;
 		return;
 	}
-	addr.sin6_port = 0;
+	addr.sin6_port = req->port;
 
 	self->tcp_sock = socket(addr.sin6_family, SOCK_STREAM, 0);
 	if (self->tcp_sock < 0) {
@@ -201,7 +208,7 @@ server_msg_tcp_acceptor(struct session_state *self, struct kpm_header *req)
 		return;
 	}
 
-	if (kpm_reply_acceptor(self->main_sock, req, &addr, len) < 1) {
+	if (kpm_reply_acceptor(self->main_sock, hdr, &addr, len) < 1) {
 		warn("Failed reply in %s", __func__);
 		self->quit = 1;
 		return;

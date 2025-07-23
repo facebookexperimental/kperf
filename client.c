@@ -63,6 +63,7 @@ static struct {
 	unsigned int dmabuf_tx_size_mb;
 	unsigned int num_rx_queues;
 	bool validate;
+	unsigned int listen_port;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
 	.src = "localhost",
@@ -94,6 +95,7 @@ static struct {
 		.bus = DEVICE_BUS_ANY,
 		.device = DEVICE_DEVICE_ANY
 	},
+	.listen_port = 0,
 };
 
 #define dbg(fmt...) while (0) { warnx(fmt); }
@@ -269,6 +271,8 @@ static const struct opt_table opts[] = {
 		     &opt.devmem_dst_dev, "Select the destination device for the TCP Devmem memory provider"),
 	OPT_WITH_ARG("--devmem-src-dev <arg>", opt_set_dev, opt_show_dev,
 		     &opt.devmem_src_dev, "Select the source device for the TCP Devmem memory provider"),
+	OPT_WITH_ARG("--listen_port <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.listen_port, "Set the destination server listening port"),
 	OPT_ENDTABLE
 };
 
@@ -799,7 +803,7 @@ int main(int argc, char *argv[])
 
 	/* Main */
 	len = sizeof(conn_addr);
-	if (kpm_req_tcp_sock(dst, &conn_addr, &len) < 0) {
+	if (kpm_req_tcp_sock(dst, opt.listen_port, &conn_addr, &len) < 0) {
 		warnx("Failed create TCP acceptor");
 		goto out;
 	}

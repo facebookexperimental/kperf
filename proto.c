@@ -125,6 +125,15 @@ int kpm_send_conn_id(int fd, __u32 id, __u32 cpu)
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_CONNECTION_ID);
 }
 
+int kpm_send_tcp_acceptor(int fd, __u16 port)
+{
+	struct kpm_tcp_acceptor msg;
+
+	msg.port = port;
+
+	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_OPEN_TCP_ACCEPTOR);
+}
+
 int kpm_send_connect(int fd, struct sockaddr_in6 *addr, socklen_t len,
 		     __u32 mss)
 {
@@ -323,13 +332,13 @@ err_free:
 	return -1;
 }
 
-int kpm_req_tcp_sock(int fd, struct sockaddr_in6 *addr, socklen_t *len)
+int kpm_req_tcp_sock(int fd, unsigned int port, struct sockaddr_in6 *addr, socklen_t *len)
 {
 	struct kpm_tcp_acceptor_reply *repl;
 	struct kpm_header hdr;
 	int id;
 
-	id = kpm_send(fd, &hdr, sizeof(hdr), KPM_MSG_TYPE_OPEN_TCP_ACCEPTOR);
+	id = kpm_send_tcp_acceptor(fd, port);
 	if (id < 0) {
 		warnx("Failed to request TCP sock");
 		return id;
