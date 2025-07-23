@@ -26,6 +26,7 @@ struct worker_state {
 	struct list_head connections;
 	struct worker_state_devmem devmem;
 	bool validate;
+	const struct worker_ops *ops;
 };
 
 struct connection {
@@ -52,6 +53,13 @@ struct connection {
 		} rr;
 	};
 	struct list_node connections;
+};
+
+struct worker_ops {
+	void (*prep)(struct worker_state *state);
+	void (*wait)(struct worker_state *state, int msec);
+	void (*conn_add)(struct worker_state *state, struct connection *conn);
+	void (*conn_close)(struct worker_state *state, struct connection *conn);
 };
 
 #endif /* WORKER_H */
