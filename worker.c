@@ -53,7 +53,7 @@ worker_epoll_conn_close(struct worker_state *self, struct connection *conn)
 static void
 worker_kill_conn(struct worker_state *self, struct connection *conn)
 {
-	worker_epoll_conn_close(self, conn);
+	self->ops->conn_close(self, conn);
 	close(conn->fd);
 	list_del(&conn->connections);
 	free(conn->rxbuf);
@@ -302,7 +302,7 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 		else
 			conn->to_recv = len;
 
-		worker_epoll_conn_add(self, conn);
+		self->ops->conn_add(self, conn);
 	}
 
 	self->cpu_start = cpu_stat_snapshot(0);
@@ -731,6 +731,18 @@ static void worker_epoll_wait(struct worker_state *self, int msec)
 	}
 }
 
+static const struct worker_ops epoll_worker_ops = {
+	.prep		= worker_epoll_prep,
+	.wait		= worker_epoll_wait,
+	.conn_add	= worker_epoll_conn_add,
+	.conn_close	= worker_epoll_conn_close,
+};
+
+static void worker_epoll_init(struct worker_state *self)
+{
+	self->ops = &epoll_worker_ops;
+}
+
 /* == Main loop == */
 
 void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
@@ -744,9 +756,11 @@ void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx
 		.devmem = { .mem = devmem, .dmabuf_id = dmabuf_id },
 	};
 
+	worker_epoll_init(&self);
+
 	list_head_init(&self.connections);
 
-	worker_epoll_prep(&self);
+	self.ops->prep(&self);
 
 	while (!self.quit) {
 		int msec = -1;
@@ -761,7 +775,7 @@ void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx
 				worker_report_test(&self);
 		}
 
-		worker_epoll_wait(&self, msec);
+		self.ops->wait(&self, msec);
 	}
 
 	kpm_dbg("exiting!");
