@@ -84,7 +84,7 @@ worker_find_connection_by_fd(struct worker_state *self, int fd)
 }
 
 static void
-worker_kill_conn(struct worker_state *self, struct connection *conn)
+worker_epoll_conn_close(struct worker_state *self, struct connection *conn)
 {
 	struct epoll_event ev = {};
 
@@ -93,6 +93,12 @@ worker_kill_conn(struct worker_state *self, struct connection *conn)
 		warn("Failed to del poll out");
 	if (self->rx_mode == KPM_RX_MODE_DEVMEM)
 		(void)devmem_release_tokens(conn->fd, &conn->devmem);
+}
+
+static void
+worker_kill_conn(struct worker_state *self, struct connection *conn)
+{
+	worker_epoll_conn_close(self, conn);
 	close(conn->fd);
 	list_del(&conn->connections);
 	free(conn->rxbuf);
@@ -243,11 +249,29 @@ worker_msg_id(struct worker_state *self, struct kpm_header *hdr)
 }
 
 static void
+worker_epoll_conn_add(struct worker_state *self, struct connection *conn)
+{
+	struct epoll_event ev = {};
+	int zc;
+
+	zc = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY || self->tx_mode == KPM_TX_MODE_DEVMEM;
+	if (setsockopt(conn->fd, SOL_SOCKET, SO_ZEROCOPY, &zc, sizeof(zc))) {
+		warnx("Failed to set SO_ZEROCOPY");
+		self->quit = 1;
+		return;
+	}
+
+	ev.events = EPOLLIN | EPOLLOUT;
+	ev.data.fd = conn->fd;
+	if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, conn->fd, &ev) < 0)
+		warn("Failed to modify poll out");
+}
+
+static void
 worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 {
 	struct kpm_test *req = (void *)hdr;
 	unsigned int i;
-	int zc;
 
 	if (self->test) {
 		warn("Already running a test");
@@ -261,7 +285,6 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 	memcpy(self->test, req, hdr->len);
 
 	for (i = 0; i < req->n_conns; i++) {
-		struct epoll_event ev = {};
 		struct connection *conn;
 		socklen_t info_len;
 		__u64 len;
@@ -324,17 +347,7 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 		else
 			conn->to_recv = len;
 
-		zc = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY || self->tx_mode == KPM_TX_MODE_DEVMEM;
-		if (setsockopt(conn->fd, SOL_SOCKET, SO_ZEROCOPY, &zc, sizeof(zc))) {
-			warnx("Failed to set SO_ZEROCOPY");
-			self->quit = 1;
-			return;
-		}
-
-		ev.events = EPOLLIN | EPOLLOUT;
-		ev.data.fd = conn->fd;
-		if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, conn->fd, &ev) < 0)
-			warn("Failed to modify poll out");
+		worker_epoll_conn_add(self, conn);
 	}
 
 	self->cpu_start = cpu_stat_snapshot(0);
@@ -727,6 +740,42 @@ worker_handle_conn(struct worker_state *self, int fd, unsigned int events)
 		warnx("Connection has nothing to do %x", events);
 }
 
+static void worker_epoll_prep(struct worker_state *self)
+{
+	int fd = self->main_sock;
+	struct epoll_event ev;
+
+	self->epollfd = epoll_create1(0);
+	if (self->epollfd < 0)
+		err(5, "Failed to create epoll");
+
+	ev.events = EPOLLIN;
+	ev.data.fd = fd;
+	if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, fd, &ev) < 0)
+		err(6, "Failed to init epoll");
+}
+
+static void worker_epoll_wait(struct worker_state *self, int msec)
+{
+	struct epoll_event events[32];
+	int i, nfds;
+
+	nfds = epoll_wait(self->epollfd, events, ARRAY_SIZE(events),
+				msec);
+	if (nfds < 0)
+		err(7, "Failed to epoll");
+
+	for (i = 0; i < nfds; i++) {
+		struct epoll_event *e = &events[i];
+
+		if (e->data.fd == self->main_sock)
+			worker_handle_main_sock(self);
+		else
+			worker_handle_conn(self, e->data.fd,
+						e->events);
+	}
+}
+
 /* == Main loop == */
 
 void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
@@ -739,20 +788,10 @@ void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx
 		.validate = validate,
 		.devmem = { .mem = devmem, .dmabuf_id = dmabuf_id },
 	};
-	struct epoll_event ev, events[32];
-	int i, nfds;
 
 	list_head_init(&self.connections);
 
-	/* Init epoll */
-	self.epollfd = epoll_create1(0);
-	if (self.epollfd < 0)
-		err(5, "Failed to create epoll");
-
-	ev.events = EPOLLIN;
-	ev.data.fd = fd;
-	if (epoll_ctl(self.epollfd, EPOLL_CTL_ADD, fd, &ev) < 0)
-		err(6, "Failed to init epoll");
+	worker_epoll_prep(&self);
 
 	while (!self.quit) {
 		int msec = -1;
@@ -767,20 +806,7 @@ void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx
 				worker_report_test(&self);
 		}
 
-		nfds = epoll_wait(self.epollfd, events, ARRAY_SIZE(events),
-				  msec);
-		if (nfds < 0)
-			err(7, "Failed to epoll");
-
-		for (i = 0; i < nfds; i++) {
-			struct epoll_event *e = &events[i];
-
-			if (e->data.fd == self.main_sock)
-				worker_handle_main_sock(&self);
-			else
-				worker_handle_conn(&self, e->data.fd,
-						   e->events);
-		}
+		worker_epoll_wait(&self, msec);
 	}
 
 	kpm_dbg("exiting!");
