@@ -19,7 +19,7 @@ void print_tcp_info(struct tcp_info *ti)
 	       "de-ry_r| %llu %llu %llu %llu\n"
 	       "de-ered| %u %u\n"
 	       "bytes_s| %llu %llu\n"
-	       "dsack_d| %u %u %u %u",
+	       "dsack_d| %u %u %u %u\n",
 	       ti->tcpi_state,
 	       ti->tcpi_ca_state,
 	       ti->tcpi_retransmits,
