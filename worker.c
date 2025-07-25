@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <linux/errqueue.h>
-#include <linux/tcp.h>
 #include <sys/epoll.h>
 #include <sys/sysinfo.h>
 
@@ -50,7 +49,7 @@ worker_epoll_conn_close(struct worker_state *self, struct connection *conn)
 		(void)devmem_release_tokens(conn->fd, &conn->devmem);
 }
 
-static void
+void
 worker_kill_conn(struct worker_state *self, struct connection *conn)
 {
 	self->ops->conn_close(self, conn);
@@ -337,17 +336,10 @@ static const struct {
 	KPM_HNDL(END_TEST, end_test),
 };
 
-static void worker_handle_main_sock(struct worker_state *self)
+void worker_handle_proto(struct worker_state *self, struct kpm_header *hdr)
 {
-	struct kpm_header *hdr;
 	int i;
 
-	hdr = kpm_receive(self->main_sock);
-	if (!hdr) {
-		__kpm_dbg("<<", "ctrl recv failed");
-		self->quit = 1;
-		return;
-	}
 	kpm_cmd_dbg_start(hdr);
 
 	for (i = 0; i < (int)ARRAY_SIZE(msg_handlers); i++) {
@@ -369,6 +361,21 @@ static void worker_handle_main_sock(struct worker_state *self)
 	}
 
 	kpm_cmd_dbg_end(hdr);
+}
+
+static void worker_handle_main_sock(struct worker_state *self)
+{
+	struct kpm_header *hdr;
+
+	hdr = kpm_receive(self->main_sock);
+	if (!hdr) {
+		__kpm_dbg("<<", "ctrl recv failed");
+		self->quit = 1;
+		return;
+	}
+
+	worker_handle_proto(self, hdr);
+
 	free(hdr);
 }
 
@@ -439,11 +446,9 @@ worker_send_disarm(struct worker_state *self, struct connection *conn,
 		warn("Failed to modify poll out");
 }
 
-static void
-worker_send_finished(struct worker_state *self, struct connection *conn,
-		     unsigned int events)
+void
+worker_send_finished(struct worker_state *self, struct connection *conn)
 {
-	worker_send_disarm(self, conn, events);
 	worker_record_rr_time(self, conn);
 
 	if (conn->spec->type != KPM_TEST_TYPE_RR)
@@ -457,7 +462,7 @@ worker_send_finished(struct worker_state *self, struct connection *conn,
 		conn->to_recv =	conn->spec->arg.rr.req_size;
 }
 
-static void
+void
 worker_recv_finished(struct worker_state *self, struct connection *conn)
 {
 	if (!self->test)
@@ -586,7 +591,8 @@ worker_handle_send(struct worker_state *self, struct connection *conn,
 		}
 
 		if (!conn->to_send && !conn->to_send_comp) {
-			worker_send_finished(self, conn, events);
+			worker_send_disarm(self, conn, events);
+			worker_send_finished(self, conn);
 			break;
 		}
 

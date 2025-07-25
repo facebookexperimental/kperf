@@ -4,6 +4,8 @@
 #ifndef WORKER_H
 #define WORKER_H 1
 
+#include <linux/tcp.h>
+
 #include <ccan/time/time.h>
 #include <ccan/list/list.h>
 
@@ -61,5 +63,10 @@ struct worker_ops {
 	void (*conn_add)(struct worker_state *state, struct connection *conn);
 	void (*conn_close)(struct worker_state *state, struct connection *conn);
 };
+
+void worker_handle_proto(struct worker_state *self, struct kpm_header *hdr);
+void worker_kill_conn(struct worker_state *self, struct connection *conn);
+void worker_send_finished(struct worker_state *self, struct connection *conn);
+void worker_recv_finished(struct worker_state *self, struct connection *conn);
 
 #endif /* WORKER_H */
