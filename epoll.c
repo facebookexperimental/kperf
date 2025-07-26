@@ -372,7 +372,7 @@ static void ep_exit(struct worker_state *self)
 {
 }
 
-static const struct worker_ops epoll_worker_ops = {
+static const struct io_ops epoll_io_ops = {
 	.prep		= ep_prep,
 	.wait		= ep_wait,
 	.conn_add	= ep_conn_add,
@@ -382,5 +382,5 @@ static const struct worker_ops epoll_worker_ops = {
 
 void worker_epoll_init(struct worker_state *self)
 {
-	self->ops = &epoll_worker_ops;
+	self->ops = &epoll_io_ops;
 }

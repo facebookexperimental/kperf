@@ -330,7 +330,7 @@ static void iou_exit(struct worker_state *self)
 	free(self->io_state);
 }
 
-static const struct worker_ops iou_worker_ops = {
+static const struct io_ops iou_io_ops = {
 	.prep		= iou_prep,
 	.wait		= iou_wait,
 	.conn_add	= iou_conn_add,
@@ -340,5 +340,5 @@ static const struct worker_ops iou_worker_ops = {
 
 void worker_iou_init(struct worker_state *self)
 {
-	self->ops = &iou_worker_ops;
+	self->ops = &iou_io_ops;
 }
