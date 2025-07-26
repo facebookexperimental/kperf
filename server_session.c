@@ -45,6 +45,7 @@ struct session_state {
 	struct list_head tests;
 	struct session_state_devmem devmem;
 	bool validate;
+	bool iou;
 };
 
 struct connection {
@@ -531,6 +532,7 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	self->rx_mode = req->rx_mode;
 	self->tx_mode = req->tx_mode;
 	self->validate = req->validate;
+	self->iou = req->iou;
 
 	if (!self->tcp_sock && (req->tx_mode == KPM_TX_MODE_DEVMEM)) {
 		ret = devmem_setup_tx(&self->devmem, req->tx_provider, req->dmabuf_tx_size_mb,
@@ -586,6 +588,7 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 			.devmem = self->devmem.mem,
 			.validate = self->validate,
 			.dmabuf_id = dmabuf_id,
+			.iou = self->iou,
 		};
 		pworker_main(args);
 		exit(1);

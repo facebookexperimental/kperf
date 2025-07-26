@@ -63,6 +63,8 @@ static struct {
 	unsigned int dmabuf_tx_size_mb;
 	unsigned int num_rx_queues;
 	bool validate;
+	bool iou_src;
+	bool iou_dst;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
 	.src = "localhost",
@@ -94,6 +96,8 @@ static struct {
 		.bus = DEVICE_BUS_ANY,
 		.device = DEVICE_DEVICE_ANY
 	},
+	.iou_src = false,
+	.iou_dst = false,
 };
 
 #define dbg(fmt...) while (0) { warnx(fmt); }
@@ -269,6 +273,10 @@ static const struct opt_table opts[] = {
 		     &opt.devmem_dst_dev, "Select the destination device for the TCP Devmem memory provider"),
 	OPT_WITH_ARG("--devmem-src-dev <arg>", opt_set_dev, opt_show_dev,
 		     &opt.devmem_src_dev, "Select the source device for the TCP Devmem memory provider"),
+	OPT_WITHOUT_ARG("--iou-src", opt_set_bool, &opt.iou_src,
+			"Use io_uring on source server"),
+	OPT_WITHOUT_ARG("--iou-dst", opt_set_bool, &opt.iou_dst,
+			"Use io_uring on destination server"),
 	OPT_ENDTABLE
 };
 
@@ -743,11 +751,17 @@ int main(int argc, char *argv[])
 	if (inet_sockaddr(opt.src, &src_addr) < 0)
 		errx(1, "failed to get sockaddr from %s\n", opt.src);
 
+	/* io_uring doesn't support devmem yet */
+	if (opt.devmem_rx && opt.iou_dst)
+		errx(1, "io_uring does not support --devmem-rx yet");
+	if (opt.devmem_tx && opt.iou_src)
+		errx(1, "io_uring does not support --devmem-tx yet");
+
 	if (opt.msg_trunc && opt.validate)
 		errx(1, "--msg-trunc and --validate yes are mutually exclusive");
 
-	if (opt.msg_trunc && opt.devmem_rx)
-		errx(1, "--msg-trunc and --devmem-rx are mutually exclusive");
+	if (opt.msg_trunc && (opt.devmem_rx || opt.iou_dst))
+		errx(1, "--msg-trunc and (--devmem-rx or --iou-dst) are mutually exclusive");
 
 	if (opt.msg_trunc)
 		rx_mode = KPM_RX_MODE_SOCKET_TRUNC;
@@ -807,7 +821,7 @@ int main(int argc, char *argv[])
 	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.dmabuf_rx_size_mb,
 			 opt.dmabuf_tx_size_mb, opt.num_rx_queues, opt.validate,
 			 opt.devmem_rx_memory, opt.devmem_tx_memory,
-			 &opt.devmem_dst_dev, NULL) < 0) {
+			 &opt.devmem_dst_dev, NULL, opt.iou_dst) < 0) {
 		warnx("Failed setup destination mode");
 		goto out;
 	}
@@ -815,7 +829,7 @@ int main(int argc, char *argv[])
 	if (kpm_req_mode(src, rx_mode, tx_mode, opt.dmabuf_rx_size_mb,
 			 opt.dmabuf_tx_size_mb, opt.num_rx_queues, opt.validate,
 			 opt.devmem_rx_memory, opt.devmem_tx_memory,
-			 &opt.devmem_src_dev, &src_addr) < 0) {
+			 &opt.devmem_src_dev, &src_addr, opt.iou_src) < 0) {
 		warnx("Failed setup source mode");
 		goto out;
 	}

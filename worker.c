@@ -22,6 +22,7 @@
 #include "proto_dbg.h"
 #include "server.h"
 #include "tcp.h"
+#include "iou.h"
 
 unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
@@ -767,7 +768,10 @@ void NORETURN pworker_main(struct worker_main_args args)
 		.devmem = { .mem = args.devmem, .dmabuf_id = args.dmabuf_id },
 	};
 
-	worker_epoll_init(&self);
+	if (args.iou)
+		worker_iou_init(&self);
+	else
+		worker_epoll_init(&self);
 
 	list_head_init(&self.connections);
 

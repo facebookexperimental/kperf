@@ -9,6 +9,7 @@
 #include <linux/types.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <stdbool.h>
 
 #define KPERF_MAX_CPUS	1024
 
@@ -164,6 +165,7 @@ struct kpm_mode {
 	struct sockaddr_in6 addr;
 
 	__u8 validate;
+	__u8 iou;
 };
 
 enum kpm_tls_mask {
@@ -302,7 +304,7 @@ int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
 		  __u32 num_rx_queues, __u8 validate,
 		  enum memory_provider_type rx_provider,
 		  enum memory_provider_type tx_provider,
-		  struct pci_dev *dev, struct sockaddr_in6 *addr);
+		  struct pci_dev *dev, struct sockaddr_in6 *addr, bool iou);
 int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu);
 
 void kpm_reply_error(int fd, struct kpm_header *hdr, __u16 error);
@@ -330,7 +332,7 @@ int kpm_req_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
 		 __u32 num_rx_queues, __u8 validate,
 		 enum memory_provider_type rx_provider,
 		 enum memory_provider_type tx_provider,
-		 struct pci_dev *dev, struct sockaddr_in6 *addr);
+		 struct pci_dev *dev, struct sockaddr_in6 *addr, bool iou);
 int kpm_req_disconnect(int fd, __u32 connection_id);
 
 #endif /* PROTO_H */
