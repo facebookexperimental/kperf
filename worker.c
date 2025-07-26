@@ -751,15 +751,14 @@ static void worker_epoll_init(struct worker_state *self)
 
 /* == Main loop == */
 
-void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
-			   struct memory_buffer *devmem, bool validate, int dmabuf_id)
+void NORETURN pworker_main(struct worker_main_args args)
 {
 	struct worker_state self = {
-		.main_sock = fd,
-		.rx_mode = rx_mode,
-		.tx_mode = tx_mode,
-		.validate = validate,
-		.devmem = { .mem = devmem, .dmabuf_id = dmabuf_id },
+		.main_sock = args.fd,
+		.rx_mode = args.rx_mode,
+		.tx_mode = args.tx_mode,
+		.validate = args.validate,
+		.devmem = { .mem = args.devmem, .dmabuf_id = args.dmabuf_id },
 	};
 
 	worker_epoll_init(&self);
