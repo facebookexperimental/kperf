@@ -31,6 +31,7 @@ struct server_session {
 #define MSG_SOCK_DEVMEM 0x2000000
 #define SO_DEVMEM_LINEAR 78
 #define SO_DEVMEM_DMABUF 79
+#define SCM_DEVMEM_DMABUF SO_DEVMEM_DMABUF
 #define SO_DEVMEM_DONTNEED 80
 
 struct dmabuf_cmsg {
