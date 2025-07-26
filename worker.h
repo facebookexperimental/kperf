@@ -20,6 +20,7 @@ struct worker_state {
 	int epollfd;
 	unsigned int id;
 	int quit;
+	int ended;
 	struct kpm_test *test;
 	struct cpu_stat *cpu_start;
 	struct timemono test_start;
@@ -29,6 +30,7 @@ struct worker_state {
 	struct worker_state_devmem devmem;
 	bool validate;
 	const struct worker_ops *ops;
+	void *io_state;
 };
 
 struct connection {
@@ -62,6 +64,7 @@ struct worker_ops {
 	void (*wait)(struct worker_state *state, int msec);
 	void (*conn_add)(struct worker_state *state, struct connection *conn);
 	void (*conn_close)(struct worker_state *state, struct connection *conn);
+	void (*exit)(struct worker_state *state);
 };
 
 void worker_handle_proto(struct worker_state *self, struct kpm_header *hdr);
