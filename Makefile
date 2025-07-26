@@ -26,7 +26,7 @@ ifdef USE_CUDA
 server: LIBS += -lcuda -lcudart -L/usr/local/cuda/lib64
 endif
 
-server: $(CCAN_PATH)/libccan.a $(YNL_PATH)/libynl.a $(LIBURING_PATH)/src/liburing.a server.o server_session.o proto.o worker.o devmem.o cpu_stat.o tcp.o
+server: $(CCAN_PATH)/libccan.a $(YNL_PATH)/libynl.a $(LIBURING_PATH)/src/liburing.a server.o server_session.o proto.o iou.o worker.o devmem.o cpu_stat.o tcp.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
 client: $(CCAN_PATH)/libccan.a client.o proto.o bipartite_match.o

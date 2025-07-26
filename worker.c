@@ -323,6 +323,7 @@ worker_msg_end_test(struct worker_state *self, struct kpm_header *hdr)
 	self->cpu_start = NULL;
 	list_for_each_safe(&self->connections, conn, next, connections)
 		worker_kill_conn(self, conn);
+	self->ended = 1;
 }
 
 static const struct {
@@ -737,11 +738,16 @@ static void worker_epoll_wait(struct worker_state *self, int msec)
 	}
 }
 
+static void worker_epoll_exit(struct worker_state *self)
+{
+}
+
 static const struct worker_ops epoll_worker_ops = {
 	.prep		= worker_epoll_prep,
 	.wait		= worker_epoll_wait,
 	.conn_add	= worker_epoll_conn_add,
 	.conn_close	= worker_epoll_conn_close,
+	.exit		= worker_epoll_exit,
 };
 
 static void worker_epoll_init(struct worker_state *self)
@@ -783,6 +789,7 @@ void NORETURN pworker_main(struct worker_main_args args)
 		self.ops->wait(&self, msec);
 	}
 
+	self.ops->exit(&self);
 	kpm_dbg("exiting!");
 	exit(0);
 }
