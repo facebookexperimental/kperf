@@ -29,7 +29,7 @@ struct worker_state {
 	struct list_head connections;
 	struct worker_state_devmem devmem;
 	bool validate;
-	const struct worker_ops *ops;
+	const struct io_ops *ops;
 	void *io_state;
 };
 
@@ -59,7 +59,7 @@ struct connection {
 	struct list_node connections;
 };
 
-struct worker_ops {
+struct io_ops {
 	void (*prep)(struct worker_state *state);
 	void (*wait)(struct worker_state *state, int msec);
 	void (*conn_add)(struct worker_state *state, struct connection *conn);
