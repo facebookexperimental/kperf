@@ -185,7 +185,7 @@ int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
 		  __u32 num_rx_queues, __u8 validate,
 		  enum memory_provider_type rx_provider,
 		  enum memory_provider_type tx_provider,
-		  struct pci_dev *dev, struct sockaddr_in6 *addr)
+		  struct pci_dev *dev, struct sockaddr_in6 *addr, bool iou)
 {
 	struct kpm_mode msg = {};
 
@@ -197,6 +197,7 @@ int kpm_send_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
 	msg.validate = validate;
 	msg.rx_provider = rx_provider;
 	msg.tx_provider = tx_provider;
+	msg.iou = iou;
 
 	if (dev)
 		memcpy(&msg.dev, dev, sizeof(msg.dev));
@@ -476,14 +477,14 @@ kpm_req_mode(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
 	     __u32 num_rx_queues, __u8 validate,
 	     enum memory_provider_type rx_provider,
 	     enum memory_provider_type tx_provider,
-	     struct pci_dev *dev, struct sockaddr_in6 *addr)
+	     struct pci_dev *dev, struct sockaddr_in6 *addr, bool iou)
 {
 	struct kpm_empty *repl;
 	int id;
 
 	id = kpm_send_mode(fd, rx_mode, tx_mode, dmabuf_rx_size_mb, dmabuf_tx_size_mb,
 			   num_rx_queues, validate, rx_provider, tx_provider, dev,
-			   addr);
+			   addr, iou);
 	if (id < 0) {
 		warnx("Failed to request mode");
 		return id;
