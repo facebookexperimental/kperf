@@ -579,8 +579,15 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 		int dmabuf_id = self->devmem.tx_mem ? self->devmem.tx_mem->dmabuf_id : -1;
 
 		close(p[0]);
-		pworker_main(p[1], self->rx_mode, self->tx_mode, self->devmem.mem,
-			     self->validate, dmabuf_id);
+		struct worker_main_args args = {
+			.fd = p[1],
+			.rx_mode = self->rx_mode,
+			.tx_mode = self->tx_mode,
+			.devmem = self->devmem.mem,
+			.validate = self->validate,
+			.dmabuf_id = dmabuf_id,
+		};
+		pworker_main(args);
 		exit(1);
 	}
 

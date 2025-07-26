@@ -105,12 +105,20 @@ struct worker_state_devmem {
 	int dmabuf_id;
 };
 
+struct worker_main_args {
+	int fd;
+	enum kpm_rx_mode rx_mode;
+	enum kpm_tx_mode tx_mode;
+	struct memory_buffer *devmem;
+	bool validate;
+	int dmabuf_id;
+	bool iou;
+};
+
 struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
-void NORETURN pworker_main(int fd, enum kpm_rx_mode rx_mode, enum kpm_tx_mode tx_mode,
-			   struct memory_buffer *devmem, bool validate,
-			   int dmabuf_id);
+void NORETURN pworker_main(struct worker_main_args args);
 
 int devmem_setup(struct session_state_devmem *devmem, int fd,
 		 size_t dmabuf_size, int num_queues,
