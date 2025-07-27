@@ -13,6 +13,7 @@
 #include <ccan/minmax/minmax.h>
 
 #include "worker.h"
+#include "devmem.h"
 #include "proto_dbg.h"
 
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];

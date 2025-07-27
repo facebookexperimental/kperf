@@ -27,6 +27,7 @@
 #include "proto.h"
 #include "proto_dbg.h"
 #include "server.h"
+#include "devmem.h"
 
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 

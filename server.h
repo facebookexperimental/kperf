@@ -120,19 +120,4 @@ server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
 void NORETURN pworker_main(struct worker_main_args args);
 
-int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t dmabuf_size, int num_queues,
-		 enum memory_provider_type provider, struct pci_dev *dev);
-int devmem_teardown(struct session_state_devmem *devmem);
-void devmem_teardown_tx(struct session_state_devmem *devmem);
-int devmem_release_tokens(int fd, struct connection_devmem *conn);
-ssize_t devmem_recv(int fd, struct connection_devmem *conn,
-		    unsigned char *rxbuf, size_t chunk, struct memory_buffer *mem,
-		    int rep, __u64 tot_recv, bool validate);
-int devmem_sendmsg(int fd, int dmabuf_id, size_t off, size_t n);
-void devmem_teardown_conn(struct connection_devmem *devmem);
-int devmem_prepare_connect(int fd, struct sockaddr_in6 *src, struct session_state_devmem *devmem);
-int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_type provider,
-		    int dmabuf_tx_size_mb, struct pci_dev *dev, struct sockaddr_in6 *addr);
-int devmem_bind_socket(struct session_state_devmem *devmem, int fd);
 #endif /* SERVER_H */
