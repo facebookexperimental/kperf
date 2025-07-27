@@ -127,38 +127,34 @@ static int add_steering_rule(struct sockaddr_in6 *server_sin,
 	return ethtool(ifname, &add);
 }
 
-static int rss_context_delete(struct session_state_devmem *devmem)
+static int rss_context_delete(char *ifname, int rss_context)
 {
 	struct ethtool_rxfh set = {};
 
-	if (!devmem->rss_context)
-		return 0;
-
 	set.cmd = ETHTOOL_SRSSH;
-	set.rss_context = devmem->rss_context;
+	set.rss_context = rss_context;
 	set.indir_size = 0;
 
-	if (ethtool(devmem->ifname, &set) < 0) {
-		warn("ethtool failed to delete RSS context %u", devmem->rss_context);
+	if (ethtool(ifname, &set) < 0) {
+		warn("ethtool failed to delete RSS context %u", rss_context);
 		return -1;
 	}
-
-	devmem->rss_context = 0;
 
 	return 0;
 }
 
-static int rss_context_equal(struct session_state_devmem *devmem, int start_queue,
-			     int num_queues, struct sockaddr_in6 *addr)
+static int rss_context_equal(char *ifname, int start_queue, int num_queues,
+			     struct sockaddr_in6 *addr)
 {
 	struct ethtool_rxfh get = {};
 	struct ethtool_rxfh *set;
 	__u32 indir_bytes;
+	int rss_context;
 	int queue;
 	int ret;
 
 	get.cmd = ETHTOOL_GRSSH;
-	if (ethtool(devmem->ifname, &get) < 0) {
+	if (ethtool(ifname, &get) < 0) {
 		warn("ethtool failed to get RSS context");
 		return -1;
 	}
@@ -182,15 +178,15 @@ static int rss_context_equal(struct session_state_devmem *devmem, int start_queu
 			queue = start_queue;
 	}
 
-	if (ethtool(devmem->ifname, set) < 0) {
+	if (ethtool(ifname, set) < 0) {
 		warn("ethtool failed to create RSS context");
 		ret = -1;
 		goto free_set;
 	}
 
-	devmem->rss_context = set->rss_context;
+	rss_context = set->rss_context;
 
-	if (add_steering_rule(addr, devmem->ifname, devmem->rss_context) < 0) {
+	if (add_steering_rule(addr, ifname, rss_context) < 0) {
 		warn("Failed to add rule to RSS context");
 		ret = -1;
 		goto delete_context;
@@ -198,10 +194,10 @@ static int rss_context_equal(struct session_state_devmem *devmem, int start_queu
 
 	free(set);
 
-	return 0;
+	return rss_context;
 
 delete_context:
-	rss_context_delete(devmem);
+	rss_context_delete(ifname, rss_context);
 
 free_set:
 	free(set);
@@ -690,21 +686,17 @@ static struct memory_provider *get_memory_provider(enum memory_provider_type pro
 	}
 }
 
-/* Setup Devmem RX */
-int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t dmabuf_rx_size_mb, int num_queues,
-		 enum memory_provider_type provider,
-		 struct pci_dev *dev)
+int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
+		   int *out_queue_id, int *out_rss_context)
 {
-	struct netdev_queue_id *queues;
-	char ifname[IFNAMSIZ] = {};
 	struct sockaddr_in6 addr;
-	struct ynl_error yerr;
+	char ifname[IFNAMSIZ];
 	int max_kernel_queue;
 	socklen_t optlen;
+	int rss_context;
 	int ifindex;
+	int ret = 0;
 	int rxqn;
-	int ret;
 
 	if (num_queues <= 0) {
 		warnx("Invalid number of RX queues: %u", num_queues);
@@ -717,10 +709,6 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		return -1;
 	}
 
-	rxmp = get_memory_provider(provider);
-	if (!rxmp)
-		return -1;
-
 	if (addr.sin6_family == AF_INET)
 		inet_to_inet6((void *)&addr, &addr);
 
@@ -730,17 +718,88 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		return -1;
 	}
 
-	devmem->ys = ynl_sock_create(&ynl_netdev_family, &yerr);
-	if (!devmem->ys) {
-		warnx("Failed to setup YNL socket: %s", yerr.msg);
-		return -1;
-	}
-
 	rxqn = rxq_num(ifindex);
 	if (rxqn < 2) {
 		warnx("Invalid number of queues: %d", rxqn);
+		return -1;
+	}
+
+	if (num_queues >= rxqn - 1) {
+		warnx("Invalid number of RX queues (%u) requested (max: %u)",
+		      num_queues, rxqn - 1);
+		return -1;
+	}
+
+	max_kernel_queue = rxqn - num_queues;
+
+	reset_flow_steering(ifname);
+	if (rss_equal(ifname, max_kernel_queue)) {
+		warnx("Failed to setup RSS");
+		return -1;
+	}
+
+	rss_context = rss_context_equal(ifname, max_kernel_queue,
+					num_queues, &addr);
+	if (rss_context < 0) {
+		warnx("Failed to setup RSS context");
 		ret = -1;
-		goto sock_destroy;
+		goto undo_rss;
+	}
+
+	memcpy(out_ifname, ifname, IFNAMSIZ);
+	*out_queue_id = max_kernel_queue;
+	*out_rss_context = rss_context;
+
+	return ret;
+
+undo_rss:
+	rss_equal(ifname, rxqn);
+
+	return ret;
+}
+
+void unreserve_queues(char *ifname, int rss_context)
+{
+	int ifindex;
+	int rxqn;
+
+	reset_flow_steering(ifname);
+	rss_context_delete(ifname, rss_context);
+	ifindex = if_nametoindex(ifname);
+	if (ifindex > 0) {
+		rxqn = rxq_num(ifindex);
+		if (rxqn > 0)
+			rss_equal(ifname, rxqn);
+	}
+}
+
+/* Setup Devmem RX */
+int devmem_setup(struct session_state_devmem *devmem, int fd,
+		 size_t dmabuf_rx_size_mb, int num_queues,
+		 enum memory_provider_type provider,
+		 struct pci_dev *dev)
+{
+	struct netdev_queue_id *queues;
+	struct ynl_error yerr;
+	int max_kernel_queue;
+	int ifindex;
+	int ret;
+
+	ret = reserve_queues(fd, num_queues, devmem->ifname, &max_kernel_queue,
+			     &devmem->rss_context);
+	if (ret)
+		return ret;
+
+	rxmp = get_memory_provider(provider);
+	if (!rxmp) {
+		ret = -1;
+		goto undo_queues;
+	}
+
+	devmem->ys = ynl_sock_create(&ynl_netdev_family, &yerr);
+	if (!devmem->ys) {
+		warnx("Failed to setup YNL socket: %s", yerr.msg);
+		goto undo_queues;
 	}
 
 	if (rxmp->dev_init && rxmp->dev_init(dev) < 0) {
@@ -755,35 +814,11 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		goto sock_destroy;
 	}
 
-	if (num_queues >= rxqn - 1) {
-		warnx("Invalid number of RX queues (%u) requested (max: %u)",
-		      num_queues, rxqn - 1);
-		ret = -1;
-		goto free_memory;
-	}
-
-	max_kernel_queue = rxqn - num_queues;
-
-	reset_flow_steering(ifname);
-	if (rss_equal(ifname, max_kernel_queue)) {
-		warnx("Failed to setup RSS");
-		ret = -1;
-		goto free_memory;
-	}
-
-	memcpy(devmem->ifname, ifname, IFNAMSIZ);
-
-	if (rss_context_equal(devmem, max_kernel_queue, num_queues, &addr) < 0) {
-		warnx("Failed to setup RSS context");
-		ret = -1;
-		goto undo_rss;
-	}
-
 	queues = calloc(num_queues, sizeof(*queues));
 	if (!queues) {
 		warn("Failed to allocate memory for queues");
 		ret = -1;
-		goto undo_rss_context;
+		goto free_memory;
 	}
 
 	for (int i = 0; i < num_queues; i++) {
@@ -793,6 +828,7 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		queues[i].id = max_kernel_queue + i;
 	}
 
+	ifindex = if_nametoindex(devmem->ifname);
         devmem->mem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem->fd, queues,
                                           num_queues, devmem->ys);
         if (devmem->mem->dmabuf_id < 0) {
@@ -805,32 +841,20 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 
 free_queues:
 	free(queues);
-undo_rss_context:
-	rss_context_delete(devmem);
-undo_rss:
-	rss_equal(ifname, rxqn);
 free_memory:
 	rxmp->free(devmem->mem);
 sock_destroy:
 	ynl_sock_destroy(devmem->ys);
 	devmem->ys = NULL;
+undo_queues:
+	unreserve_queues(devmem->ifname, devmem->rss_context);
 
 	return ret;
 }
 
 int devmem_teardown(struct session_state_devmem *devmem)
 {
-	int rxqn;
-	int ifindex;
-
-	reset_flow_steering(devmem->ifname);
-	rss_context_delete(devmem);
-        ifindex = if_nametoindex(devmem->ifname);
-	if (ifindex > 0) {
-		rxqn = rxq_num(ifindex);
-		if (rxqn > 0)
-			rss_equal(devmem->ifname, rxqn);
-	}
+	unreserve_queues(devmem->ifname, devmem->rss_context);
 	if (devmem->ys)
 		ynl_sock_destroy(devmem->ys);
 	if (rxmp)
