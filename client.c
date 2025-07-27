@@ -828,18 +828,37 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if (kpm_req_mode(dst, rx_mode, tx_mode, opt.dmabuf_rx_size_mb,
-			 opt.dmabuf_tx_size_mb, opt.num_rx_queues, opt.validate,
-			 opt.devmem_rx_memory, opt.devmem_tx_memory,
-			 &opt.devmem_dst_dev, NULL, opt.iou_dst) < 0) {
+	struct kpm_mode dst_mode = {
+		.rx_mode = rx_mode,
+		.tx_mode = tx_mode,
+		.rx_provider = opt.devmem_rx_memory,
+		.tx_provider = opt.devmem_tx_memory,
+		.dev = opt.devmem_dst_dev,
+		.dmabuf_rx_size_mb = opt.dmabuf_rx_size_mb,
+		.dmabuf_tx_size_mb = opt.dmabuf_tx_size_mb,
+		.num_rx_queues = opt.num_rx_queues,
+		.validate = opt.validate,
+		.iou = opt.iou_dst,
+	};
+	if (kpm_req_mode(dst, &dst_mode) < 0) {
 		warnx("Failed setup destination mode");
 		goto out;
 	}
 
-	if (kpm_req_mode(src, rx_mode, tx_mode, opt.dmabuf_rx_size_mb,
-			 opt.dmabuf_tx_size_mb, opt.num_rx_queues, opt.validate,
-			 opt.devmem_rx_memory, opt.devmem_tx_memory,
-			 &opt.devmem_src_dev, &src_addr, opt.iou_src) < 0) {
+	struct kpm_mode src_mode = {
+		.rx_mode = rx_mode,
+		.tx_mode = tx_mode,
+		.rx_provider = opt.devmem_rx_memory,
+		.tx_provider = opt.devmem_tx_memory,
+		.dev = opt.devmem_src_dev,
+		.dmabuf_rx_size_mb = opt.dmabuf_rx_size_mb,
+		.dmabuf_tx_size_mb = opt.dmabuf_tx_size_mb,
+		.num_rx_queues = opt.num_rx_queues,
+		.addr = src_addr,
+		.validate = opt.validate,
+		.iou = opt.iou_src,
+	};
+	if (kpm_req_mode(src, &src_mode) < 0) {
 		warnx("Failed setup source mode");
 		goto out;
 	}
