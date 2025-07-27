@@ -126,6 +126,7 @@ struct kpm_tcp_cc {
 enum kpm_rx_mode {
 	KPM_RX_MODE_SOCKET,
 	KPM_RX_MODE_SOCKET_TRUNC,
+	KPM_RX_MODE_SOCKET_ZEROCOPY,
 	KPM_RX_MODE_DEVMEM,
 };
 
