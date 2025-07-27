@@ -17,10 +17,10 @@
 
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
-static struct connection *
+static struct worker_connection *
 ep_find_connection_by_fd(struct worker_state *self, int fd)
 {
-	struct connection *conn;
+	struct worker_connection *conn;
 
 	list_for_each(&self->connections, conn, connections) {
 		if (conn->fd == fd)
@@ -30,7 +30,7 @@ ep_find_connection_by_fd(struct worker_state *self, int fd)
 }
 
 static void
-ep_conn_close(struct worker_state *self, struct connection *conn)
+ep_conn_close(struct worker_state *self, struct worker_connection *conn)
 {
 	struct epoll_event ev = {};
 
@@ -42,7 +42,7 @@ ep_conn_close(struct worker_state *self, struct connection *conn)
 }
 
 static void
-ep_conn_add(struct worker_state *self, struct connection *conn)
+ep_conn_add(struct worker_state *self, struct worker_connection *conn)
 {
 	struct epoll_event ev = {};
 	int zc;
@@ -77,7 +77,7 @@ static void ep_handle_main_sock(struct worker_state *self)
 }
 
 static void
-ep_send_arm(struct worker_state *self, struct connection *conn,
+ep_send_arm(struct worker_state *self, struct worker_connection *conn,
 	    unsigned int events)
 {
 	struct epoll_event ev = {};
@@ -92,7 +92,7 @@ ep_send_arm(struct worker_state *self, struct connection *conn,
 }
 
 static void
-ep_send_disarm(struct worker_state *self, struct connection *conn,
+ep_send_disarm(struct worker_state *self, struct worker_connection *conn,
 	       unsigned int events)
 {
 	struct epoll_event ev = {};
@@ -107,7 +107,7 @@ ep_send_disarm(struct worker_state *self, struct connection *conn,
 }
 
 static void
-ep_handle_completions(struct worker_state *self, struct connection *conn,
+ep_handle_completions(struct worker_state *self, struct worker_connection *conn,
 		      unsigned int events)
 {
 	struct sock_extended_err *serr;
@@ -173,7 +173,7 @@ kill_conn:
 }
 
 static void
-ep_handle_send(struct worker_state *self, struct connection *conn,
+ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 	       unsigned int events)
 {
 	unsigned int rep = max_t(int, 10, conn->to_send / conn->write_size + 1);
@@ -234,7 +234,7 @@ ep_handle_send(struct worker_state *self, struct connection *conn,
 }
 
 static ssize_t
-ep_handle_regular_recv(struct worker_state *self, struct connection *conn,
+ep_handle_regular_recv(struct worker_state *self, struct worker_connection *conn,
 		       size_t chunk, int rep, bool validate)
 {
 	bool msg_trunc = self->rx_mode == KPM_RX_MODE_SOCKET_TRUNC;
@@ -257,7 +257,7 @@ ep_handle_regular_recv(struct worker_state *self, struct connection *conn,
 }
 
 static void
-ep_handle_recv(struct worker_state *self, struct connection *conn)
+ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 {
 	unsigned int rep = 10;
 
@@ -307,7 +307,7 @@ static void
 ep_handle_conn(struct worker_state *self, int fd, unsigned int events)
 {
 	static int warnd_unexpected_pi;
-	struct connection *conn;
+	struct worker_connection *conn;
 
 	conn = ep_find_connection_by_fd(self, fd);
 

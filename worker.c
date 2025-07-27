@@ -24,7 +24,7 @@
 unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
 void
-worker_kill_conn(struct worker_state *self, struct connection *conn)
+worker_kill_conn(struct worker_state *self, struct worker_connection *conn)
 {
 	self->ops->conn_close(self, conn);
 	close(conn->fd);
@@ -41,7 +41,7 @@ worker_pstat_cmp(unsigned int const *a, unsigned int const *b, void *unused)
 }
 
 static void
-worker_report_pstats(struct worker_state *self, struct connection *conn,
+worker_report_pstats(struct worker_state *self, struct worker_connection *conn,
 		     struct kpm_test_result *data)
 {
 	if (conn->spec->arg.rr.timings < 2)
@@ -60,9 +60,9 @@ worker_report_pstats(struct worker_state *self, struct connection *conn,
 
 static void worker_report_test(struct worker_state *self)
 {
+	struct worker_connection *conn;
 	struct cpu_stat *cpu, *cpu_pct;
 	struct kpm_test_results *res;
-	struct connection *conn;
 	unsigned int ncpus, i;
 	struct timerel t;
 	size_t sz;
@@ -194,7 +194,7 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 	memcpy(self->test, req, hdr->len);
 
 	for (i = 0; i < req->n_conns; i++) {
-		struct connection *conn;
+		struct worker_connection *conn;
 		socklen_t info_len;
 		__u64 len;
 
@@ -269,7 +269,7 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 static void
 worker_msg_end_test(struct worker_state *self, struct kpm_header *hdr)
 {
-	struct connection *conn, *next;
+	struct worker_connection *conn, *next;
 
 	if (self->test)
 		worker_report_test(self);
@@ -322,7 +322,7 @@ void worker_handle_proto(struct worker_state *self, struct kpm_header *hdr)
 /* == Worker I/O handling == */
 
 static void
-worker_record_rr_time(struct worker_state *self, struct connection *conn)
+worker_record_rr_time(struct worker_state *self, struct worker_connection *conn)
 {
 	struct timerel delta;
 	unsigned int nsec128;
@@ -357,7 +357,7 @@ out_update:
 }
 
 void
-worker_send_finished(struct worker_state *self, struct connection *conn)
+worker_send_finished(struct worker_state *self, struct worker_connection *conn)
 {
 	worker_record_rr_time(self, conn);
 
@@ -373,7 +373,7 @@ worker_send_finished(struct worker_state *self, struct connection *conn)
 }
 
 void
-worker_recv_finished(struct worker_state *self, struct connection *conn)
+worker_recv_finished(struct worker_state *self, struct worker_connection *conn)
 {
 	if (!self->test)
 		return;
