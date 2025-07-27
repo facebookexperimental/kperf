@@ -4,6 +4,7 @@
 #include "iou.h"
 
 #include <err.h>
+#include <net/if.h>
 #include <stdlib.h>
 #include <string.h>
 #include <liburing.h>
@@ -11,7 +12,9 @@
 
 #include <ccan/minmax/minmax.h>
 
+#include "proto.h"
 #include "proto_dbg.h"
+#include "devmem.h"
 
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
@@ -341,4 +344,17 @@ static const struct io_ops iou_io_ops = {
 void worker_iou_init(struct worker_state *self)
 {
 	self->ops = &iou_io_ops;
+}
+
+int iou_zerocopy_rx_setup(struct session_state_iou *iou, int fd,
+			  int num_queues)
+{
+	return reserve_queues(fd, num_queues, iou->ifname,
+			      &iou->queue_id, &iou->rss_context);
+}
+
+int iou_zerocopy_rx_teardown(struct session_state_iou *iou)
+{
+	unreserve_queues(iou->ifname, iou->rss_context);
+	return 0;
 }

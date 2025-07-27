@@ -28,6 +28,7 @@
 #include "proto_dbg.h"
 #include "server.h"
 #include "devmem.h"
+#include "iou.h"
 
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
@@ -45,6 +46,7 @@ struct session_state {
 	struct list_head pworkers;
 	struct list_head tests;
 	struct session_state_devmem devmem;
+	struct session_state_iou iou_state;
 	bool validate;
 	bool iou;
 };
@@ -525,6 +527,14 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 				   &req->dev);
 		if (ret < 0) {
 			warnx("Failed to setup devmem");
+			self->quit = 1;
+			return;
+		}
+	}
+	if (self->tcp_sock && req->iou && req->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY) {
+		ret = iou_zerocopy_rx_setup(&self->iou_state, self->tcp_sock, req->num_rx_queues);
+		if (ret < 0) {
+			warnx("Failed to setup io_uring zero copy receive");
 			self->quit = 1;
 			return;
 		}
@@ -1063,6 +1073,8 @@ static void server_session_loop(int fd)
 		devmem_teardown(&self.devmem);
 	if (!self.tcp_sock && self.tx_mode == KPM_TX_MODE_DEVMEM)
 		devmem_teardown_tx(&self.devmem);
+	if (self.tcp_sock && self.iou && self.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
+		iou_zerocopy_rx_teardown(&self.iou_state);
 }
 
 static NORETURN void server_session(int fd)
