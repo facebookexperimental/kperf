@@ -33,7 +33,7 @@ struct worker_state {
 	void *io_state;
 };
 
-struct connection {
+struct worker_connection {
 	unsigned int id;
 	int fd;
 	unsigned int read_size;
@@ -62,14 +62,14 @@ struct connection {
 struct io_ops {
 	void (*prep)(struct worker_state *state);
 	void (*wait)(struct worker_state *state, int msec);
-	void (*conn_add)(struct worker_state *state, struct connection *conn);
-	void (*conn_close)(struct worker_state *state, struct connection *conn);
+	void (*conn_add)(struct worker_state *state, struct worker_connection *conn);
+	void (*conn_close)(struct worker_state *state, struct worker_connection *conn);
 	void (*exit)(struct worker_state *state);
 };
 
 void worker_handle_proto(struct worker_state *self, struct kpm_header *hdr);
-void worker_kill_conn(struct worker_state *self, struct connection *conn);
-void worker_send_finished(struct worker_state *self, struct connection *conn);
-void worker_recv_finished(struct worker_state *self, struct connection *conn);
+void worker_kill_conn(struct worker_state *self, struct worker_connection *conn);
+void worker_send_finished(struct worker_state *self, struct worker_connection *conn);
+void worker_recv_finished(struct worker_state *self, struct worker_connection *conn);
 
 #endif /* WORKER_H */

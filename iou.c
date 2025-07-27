@@ -41,7 +41,7 @@ tag(void *ptr, enum iou_req_type x)
 }
 
 static void *
-untag(uintptr_t ptr) 
+untag(uintptr_t ptr)
 {
 	return (void *)(ptr & ~0xf);
 }
@@ -62,7 +62,7 @@ static struct io_uring *get_ring(struct worker_state *state)
 	return &get_iou_state(state)->ring;
 }
 
-static void iou_conn_add_send(struct io_uring *ring, struct connection *conn)
+static void iou_conn_add_send(struct io_uring *ring, struct worker_connection *conn)
 {
 	struct io_uring_sqe *sqe;
 	size_t chunk;
@@ -78,7 +78,7 @@ static void iou_conn_add_send(struct io_uring *ring, struct connection *conn)
 
 static void iou_handle_send(struct worker_state *self, struct io_uring_cqe *cqe)
 {
-	struct connection *conn;
+	struct worker_connection *conn;
 	ssize_t n;
 
 	if (self->ended)
@@ -101,7 +101,7 @@ static void iou_handle_send(struct worker_state *self, struct io_uring_cqe *cqe)
 		iou_conn_add_send(get_ring(self), conn);
 }
 
-static void iou_conn_add_recv(struct io_uring *ring, struct connection *conn)
+static void iou_conn_add_recv(struct io_uring *ring, struct worker_connection *conn)
 {
 	struct io_uring_sqe *sqe;
 
@@ -113,7 +113,7 @@ static void iou_conn_add_recv(struct io_uring *ring, struct connection *conn)
 static void iou_handle_recv(struct worker_state *self, struct io_uring_cqe *cqe)
 {
 	struct io_uring *ring = get_ring(self);
-	struct connection *conn;
+	struct worker_connection *conn;
 	ssize_t n;
 	void *src;
 
@@ -302,7 +302,7 @@ static void iou_wait(struct worker_state *self, int msec)
 	io_uring_cq_advance(ring, count);
 }
 
-static void iou_conn_add(struct worker_state *state, struct connection *conn)
+static void iou_conn_add(struct worker_state *state, struct worker_connection *conn)
 {
 	struct io_uring *ring = get_ring(state);
 
@@ -312,7 +312,7 @@ static void iou_conn_add(struct worker_state *state, struct connection *conn)
 	iou_conn_add_recv(ring, conn);
 }
 
-static void iou_conn_close(struct worker_state *state, struct connection *conn)
+static void iou_conn_close(struct worker_state *state, struct worker_connection *conn)
 {
 	struct io_uring *ring = get_ring(state);
 	struct io_uring_sqe *sqe;
