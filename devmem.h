@@ -7,7 +7,7 @@
 #include <sys/socket.h>
 
 int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
-		   int *out_queue_id, int *out_rss_context);
+		   int *out_ifindex, int *out_queue_id, int *out_rss_context);
 void unreserve_queues(char *ifname, int rss_context);
 
 int devmem_setup(struct session_state_devmem *devmem, int fd,

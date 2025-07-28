@@ -167,6 +167,7 @@ struct kpm_mode {
 
 	__u8 validate;
 	__u8 iou;
+	__u32 iou_rx_size_mb;
 };
 
 enum kpm_tls_mask {

@@ -687,7 +687,7 @@ static struct memory_provider *get_memory_provider(enum memory_provider_type pro
 }
 
 int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
-		   int *out_queue_id, int *out_rss_context)
+		   int *out_ifindex, int *out_queue_id, int *out_rss_context)
 {
 	struct sockaddr_in6 addr;
 	char ifname[IFNAMSIZ];
@@ -747,6 +747,7 @@ int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
 	}
 
 	memcpy(out_ifname, ifname, IFNAMSIZ);
+	*out_ifindex = ifindex;
 	*out_queue_id = max_kernel_queue;
 	*out_rss_context = rss_context;
 
@@ -785,8 +786,8 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 	int ifindex;
 	int ret;
 
-	ret = reserve_queues(fd, num_queues, devmem->ifname, &max_kernel_queue,
-			     &devmem->rss_context);
+	ret = reserve_queues(fd, num_queues, devmem->ifname, &ifindex,
+			     &max_kernel_queue, &devmem->rss_context);
 	if (ret)
 		return ret;
 
@@ -828,7 +829,6 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		queues[i].id = max_kernel_queue + i;
 	}
 
-	ifindex = if_nametoindex(devmem->ifname);
         devmem->mem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem->fd, queues,
                                           num_queues, devmem->ys);
         if (devmem->mem->dmabuf_id < 0) {

@@ -105,6 +105,20 @@ struct worker_state_devmem {
 	int dmabuf_id;
 };
 
+struct session_state_iou {
+	unsigned int rx_size_mb;
+	char ifname[IFNAMSIZ];
+	int ifindex;
+	int rss_context;
+	int queue_id;
+};
+
+struct worker_state_iou {
+	unsigned int rx_size_mb;
+	int ifindex;
+	int queue_id;
+};
+
 struct worker_main_args {
 	int fd;
 	enum kpm_rx_mode rx_mode;
@@ -113,6 +127,9 @@ struct worker_main_args {
 	bool validate;
 	int dmabuf_id;
 	bool iou;
+	unsigned int iou_rx_size_mb;
+	int ifindex;
+	int queue_id;
 };
 
 struct server_session *
