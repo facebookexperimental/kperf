@@ -66,6 +66,7 @@ static struct {
 	bool iou_src;
 	bool iou_dst;
 	bool zerocopy_rx;
+	unsigned int iou_rx_size_mb;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
 	.src = "localhost",
@@ -100,6 +101,7 @@ static struct {
 	.iou_src = false,
 	.iou_dst = false,
 	.zerocopy_rx = false,
+	.iou_rx_size_mb = 64,
 };
 
 #define dbg(fmt...) while (0) { warnx(fmt); }
@@ -281,6 +283,8 @@ static const struct opt_table opts[] = {
 			"Use io_uring on destination server"),
 	OPT_EARLY_WITHOUT_ARG("--zerocopy-rx", opt_set_bool, &opt.zerocopy_rx,
 			      "Use zero copy on receive"),
+	OPT_WITH_ARG("--iou-rx-size-mb <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.iou_rx_size_mb, "Size of RX memory reserved by io_uring"),
 	OPT_ENDTABLE
 };
 
@@ -839,6 +843,7 @@ int main(int argc, char *argv[])
 		.num_rx_queues = opt.num_rx_queues,
 		.validate = opt.validate,
 		.iou = opt.iou_dst,
+		.iou_rx_size_mb = opt.iou_rx_size_mb,
 	};
 	if (kpm_req_mode(dst, &dst_mode) < 0) {
 		warnx("Failed setup destination mode");
@@ -857,6 +862,7 @@ int main(int argc, char *argv[])
 		.addr = src_addr,
 		.validate = opt.validate,
 		.iou = opt.iou_src,
+		.iou_rx_size_mb = opt.iou_rx_size_mb,
 	};
 	if (kpm_req_mode(src, &src_mode) < 0) {
 		warnx("Failed setup source mode");

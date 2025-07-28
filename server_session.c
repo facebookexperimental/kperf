@@ -544,6 +544,7 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	self->tx_mode = req->tx_mode;
 	self->validate = req->validate;
 	self->iou = req->iou;
+	self->iou_state.rx_size_mb = req->iou_rx_size_mb;
 
 	if (!self->tcp_sock && (req->tx_mode == KPM_TX_MODE_DEVMEM)) {
 		ret = devmem_setup_tx(&self->devmem, req->tx_provider, req->dmabuf_tx_size_mb,
@@ -600,11 +601,15 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 			.validate = self->validate,
 			.dmabuf_id = dmabuf_id,
 			.iou = self->iou,
+			.iou_rx_size_mb = self->iou_state.rx_size_mb,
+			.ifindex = self->iou_state.ifindex,
+			.queue_id = self->iou_state.queue_id,
 		};
 		pworker_main(args);
 		exit(1);
 	}
 
+	self->iou_state.queue_id++;
 	pwrk->id = ++self->worker_ids;
 	pwrk->fd = p[0];
 	close(p[1]);

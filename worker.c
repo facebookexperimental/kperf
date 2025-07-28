@@ -397,6 +397,11 @@ void NORETURN pworker_main(struct worker_main_args args)
 		.tx_mode = args.tx_mode,
 		.validate = args.validate,
 		.devmem = { .mem = args.devmem, .dmabuf_id = args.dmabuf_id },
+		.iou = {
+			.rx_size_mb = args.iou_rx_size_mb,
+			.ifindex = args.ifindex,
+			.queue_id = args.queue_id,
+		},
 	};
 
 	if (args.iou)

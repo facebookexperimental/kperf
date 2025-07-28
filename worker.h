@@ -28,6 +28,7 @@ struct worker_state {
 	unsigned int test_len_msec;
 	struct list_head connections;
 	struct worker_state_devmem devmem;
+	struct worker_state_iou iou;
 	bool validate;
 	const struct io_ops *ops;
 	void *io_state;
