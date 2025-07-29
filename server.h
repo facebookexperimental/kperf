@@ -33,6 +33,7 @@ struct server_session {
 #define SO_DEVMEM_DMABUF 79
 #define SCM_DEVMEM_DMABUF SO_DEVMEM_DMABUF
 #define SO_DEVMEM_DONTNEED 80
+#endif
 
 struct dmabuf_cmsg {
 	__u64 frag_offset;
@@ -46,7 +47,6 @@ struct dmabuf_token {
 	__u32 token_start;
 	__u32 token_count;
 };
-#endif
 
 #ifdef USE_CUDA
 struct memory_buffer_cuda {
