@@ -43,6 +43,8 @@
 
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
+static int steering_rule_loc = -1;
+
 static int ethtool(const char *ifname, void *data)
 {
 	struct ifreq ifr = {};
@@ -62,39 +64,64 @@ static int ethtool(const char *ifname, void *data)
 
 static void reset_flow_steering(const char *ifname)
 {
+	struct ethtool_rxnfc del;
+
+	if (steering_rule_loc < 0)
+		return;
+
+	del.cmd = ETHTOOL_SRXCLSRLDEL;
+	del.fs.location = steering_rule_loc;
+
+	ethtool(ifname, &del);
+
+	steering_rule_loc = -1;
+}
+
+static int find_free_rule_loc(const char *ifname, int rule_cnt)
+{
 	struct ethtool_rxnfc cnt = {};
 	struct ethtool_rxnfc *rules;
+	int free_loc = 0;
 
 	cnt.cmd = ETHTOOL_GRXCLSRLCNT;
 	if (ethtool(ifname, &cnt) < 0)
-		return;
+		return -1;
 
 	rules = calloc(1, sizeof(*rules) + (cnt.rule_cnt * sizeof(__u32)));
 	if (!rules)
-		return;
+		return -1;
 
 	rules->cmd = ETHTOOL_GRXCLSRLALL;
 	rules->rule_cnt = cnt.rule_cnt;
 	if (ethtool(ifname, rules) < 0)
 		goto free_rules;
 
-	for (__u32 i = 0; i < rules->rule_cnt; i++) {
-		struct ethtool_rxnfc del;
-
-		del.cmd = ETHTOOL_SRXCLSRLDEL;
-		del.fs.location = rules->rule_locs[i];
-
-		ethtool(ifname, &del);
+	while (true) {
+		bool used = false;
+		for (__u32 i = 0; i < rules->rule_cnt; i++)
+			if ((unsigned int)free_loc == rules->rule_locs[i]) {
+				used = true;
+				break;
+			}
+		if (!used)
+			break;
+		free_loc++;
 	}
+
+	free(rules);
+	return free_loc;
 
 free_rules:
 	free(rules);
+	return -1;
 }
 
 static int add_steering_rule(struct sockaddr_in6 *server_sin,
 			     const char *ifname, int rss_context)
 {
 	struct ethtool_rxnfc add = {};
+	struct ethtool_rxnfc cnt = {};
+	int ret;
 
 	add.cmd = ETHTOOL_SRXCLSRLINS;
 	add.rss_context = rss_context;
@@ -124,7 +151,29 @@ static int add_steering_rule(struct sockaddr_in6 *server_sin,
 
 	add.fs.flow_type |= FLOW_RSS;
 
-	return ethtool(ifname, &add);
+	cnt.cmd = ETHTOOL_GRXCLSRLCNT;
+	ret = ethtool(ifname, &cnt);
+	if (ret)
+		return ret;
+
+	if (cnt.data & RX_CLS_LOC_SPECIAL)
+		add.fs.location = RX_CLS_LOC_ANY;
+	else if (cnt.rule_cnt) {
+		ret = find_free_rule_loc(ifname, cnt.rule_cnt);
+		if (ret < 0) {
+			warnx("Failed to find free steering rule loc");
+			return -1;
+		}
+		add.fs.location = ret;
+	}
+
+	ret = ethtool(ifname, &add);
+	if (ret)
+		return ret;
+
+	steering_rule_loc = add.fs.location;
+
+	return 0;
 }
 
 static int rss_context_delete(char *ifname, int rss_context)
