@@ -765,15 +765,11 @@ int main(int argc, char *argv[])
 	if (opt.devmem_tx && opt.iou_src)
 		errx(1, "io_uring does not support --devmem-tx yet");
 
-	/* epoll doesn't support zero copy receive yet */
-	if (opt.zerocopy_rx && !opt.iou_dst)
-		errx(1, "epoll does not support --zerocopy-rx yet");
-
 	if (opt.msg_trunc && opt.validate)
 		errx(1, "--msg-trunc and --validate yes are mutually exclusive");
 
-	if (opt.msg_trunc && (opt.devmem_rx || opt.iou_dst))
-		errx(1, "--msg-trunc and (--devmem-rx or --iou-dst) are mutually exclusive");
+	if (opt.msg_trunc && (opt.devmem_rx || opt.zerocopy_rx))
+		errx(1, "--msg-trunc and (--devmem-rx or --zerocopy-rx) are mutually exclusive");
 
 	if (opt.msg_trunc)
 		rx_mode = KPM_RX_MODE_SOCKET_TRUNC;
