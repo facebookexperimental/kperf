@@ -45,6 +45,12 @@ struct worker_connection {
 	__u64 tot_sent;
 	__u64 tot_recv;
 	unsigned char *rxbuf;
+
+	/* zero copy receive */
+	size_t rsize;
+	void *raddr;
+	void *addr;
+
 	struct connection_devmem devmem;
 	struct kpm_test_spec *spec;
 	struct tcp_info init_info;
