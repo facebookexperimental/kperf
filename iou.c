@@ -49,6 +49,7 @@ enum iou_req_type {
 	IOU_REQ_TYPE_RECV		= 4,
 	IOU_REQ_TYPE_RECVZC		= 5,
 	IOU_REQ_TYPE_CANCEL		= 6,
+	IOU_REQ_TYPE_SENDZC		= 7,
 };
 
 static void *
@@ -94,6 +95,20 @@ static void iou_conn_add_send(struct io_uring *ring, struct worker_connection *c
 	io_uring_sqe_set_data(sqe, tag(conn, IOU_REQ_TYPE_SEND));
 }
 
+static void iou_conn_add_sendzc(struct io_uring *ring, struct worker_connection *conn)
+{
+	struct io_uring_sqe *sqe;
+	size_t chunk;
+	void *src;
+
+	chunk = min_t(size_t, conn->write_size, conn->to_send);
+	src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
+
+	sqe = io_uring_get_sqe(ring);
+	io_uring_prep_send_zc_fixed(sqe, conn->fd, src, chunk, 0, 0, 0);
+	io_uring_sqe_set_data(sqe, tag(conn, IOU_REQ_TYPE_SENDZC));
+}
+
 static void iou_handle_send(struct worker_state *self, struct io_uring_cqe *cqe)
 {
 	struct worker_connection *conn;
@@ -117,6 +132,39 @@ static void iou_handle_send(struct worker_state *self, struct io_uring_cqe *cqe)
 		worker_send_finished(self, conn);
 	else
 		iou_conn_add_send(get_ring(self), conn);
+}
+
+static void iou_handle_sendzc(struct worker_state *self, struct io_uring_cqe *cqe)
+{
+	struct worker_connection *conn;
+	ssize_t n;
+
+	if (self->ended)
+		return;
+
+	conn = untag(cqe->user_data);
+	if (cqe->flags & IORING_CQE_F_NOTIF) {
+		if (cqe->flags & IORING_CQE_F_MORE) {
+			warnx("Notification completion has F_MORE set");
+			worker_kill_conn(self, conn);
+		}
+		return;
+	}
+
+	n = cqe->res;
+	if (n <= 0) {
+		warnx("Send failed");
+		worker_kill_conn(self, conn);
+		return;
+	}
+
+	conn->to_send -= n;
+	conn->tot_sent += n;
+
+	if (!conn->to_send)
+		worker_send_finished(self, conn);
+	else
+		iou_conn_add_sendzc(get_ring(self), conn);
 }
 
 static void iou_conn_add_recv(struct io_uring *ring, struct worker_connection *conn)
@@ -319,6 +367,17 @@ static int iou_register_zerocopy_rx(struct worker_state *self)
 	return 0;
 }
 
+static int iou_register_zerocopy_tx(struct worker_state *self)
+{
+	struct iou_state *state = get_iou_state(self);
+	struct iovec iov;
+
+	iov.iov_base = patbuf;
+	iov.iov_len = KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1;
+
+	return io_uring_register_buffers(&state->ring, &iov, 1);
+}
+
 static void iou_prep(struct worker_state *self)
 {
 	struct iou_kpm_msg_state *msg;
@@ -355,6 +414,10 @@ static void iou_prep(struct worker_state *self)
 	if (self->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 		if (iou_register_zerocopy_rx(self))
 			err(7, "Failed to register zero copy rx");
+
+	if (self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY)
+		if (iou_register_zerocopy_tx(self))
+			err(8, "Failed to register zero copy tx");
 
 	sqe = io_uring_get_sqe(&state->ring);
 	io_uring_prep_recv(sqe, self->main_sock, &msg->hdr, sizeof(msg->hdr), MSG_PEEK | MSG_WAITALL);
@@ -467,6 +530,9 @@ static void iou_wait(struct worker_state *self, int msec)
 			case IOU_REQ_TYPE_SEND:
 				iou_handle_send(self, cqe);
 				break;
+			case IOU_REQ_TYPE_SENDZC:
+				iou_handle_sendzc(self, cqe);
+				break;
 			case IOU_REQ_TYPE_RECV:
 				iou_handle_recv(self, cqe);
 				break;
@@ -488,8 +554,12 @@ static void iou_conn_add(struct worker_state *state, struct worker_connection *c
 {
 	struct io_uring *ring = get_ring(state);
 
-	if (conn->to_send)
-		iou_conn_add_send(ring, conn);
+	if (conn->to_send) {
+		if (state->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY)
+			iou_conn_add_sendzc(ring, conn);
+		else
+			iou_conn_add_send(ring, conn);
+	}
 
 	if (state->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 		iou_conn_add_recvzc(ring, conn, get_iou_state(state)->zcrx_id);
