@@ -500,7 +500,7 @@ static void udmabuf_free(struct memory_buffer *mem)
 
 static void inet_to_inet6(struct sockaddr *addr, struct sockaddr_in6 *out)
 {
-	out->sin6_addr.s6_addr32[3] = ((struct sockaddr_in6 *)addr)->sin6_addr.s6_addr32[0];
+	out->sin6_addr.s6_addr32[3] = ((struct sockaddr_in *)addr)->sin_addr.s_addr;
 	out->sin6_addr.s6_addr32[0] = 0;
 	out->sin6_addr.s6_addr32[1] = 0;
 	out->sin6_addr.s6_addr16[4] = 0;
