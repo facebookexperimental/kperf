@@ -305,7 +305,7 @@ static int iou_register_zerocopy_rx(struct worker_state *self)
 	void *ring_ptr;
 	int ret;
 
-	area_size = self->iou.rx_size_mb * 1024 * 1024;
+	area_size = self->opts.iou.rx_size_mb * 1024 * 1024;
 	/* arbitrary ring size chosen based on rx_size_mb */
 	ring_entries = (area_size / (page_size * 2));
 	ring_size = get_rq_ring_size(ring_entries);
@@ -335,8 +335,8 @@ static int iou_register_zerocopy_rx(struct worker_state *self)
 	};
 
 	struct io_uring_zcrx_ifq_reg reg = {
-		.if_idx = self->iou.ifindex,
-		.if_rxq = self->iou.queue_id,
+		.if_idx = self->opts.iou.ifindex,
+		.if_rxq = self->opts.iou.queue_id,
 		.rq_entries = ring_entries,
 		.area_ptr = (__u64)(unsigned long)&area_reg,
 		.region_ptr = (__u64)(unsigned long)&region_reg,

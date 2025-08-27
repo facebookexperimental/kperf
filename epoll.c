@@ -240,7 +240,7 @@ ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 		chunk = min_t(size_t, conn->write_size, conn->to_send);
 
 		if (self->tx_mode == KPM_TX_MODE_DEVMEM) {
-			n = devmem_sendmsg(conn->fd, self->devmem.dmabuf_id,
+			n = devmem_sendmsg(conn->fd, self->opts.devmem.dmabuf_id,
 					   conn->tot_sent % PATTERN_PERIOD, chunk);
 		} else {
 			src = &patbuf[conn->tot_sent % PATTERN_PERIOD];
@@ -367,7 +367,7 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 		chunk = min_t(size_t, conn->read_size, conn->to_recv);
 		if (self->rx_mode == KPM_RX_MODE_DEVMEM)
 			n = devmem_recv(conn->fd, &conn->devmem,
-					conn->rxbuf, chunk, self->devmem.mem,
+					conn->rxbuf, chunk, self->opts.devmem.mem,
 					rep, conn->tot_recv, self->validate);
 		else if (self->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 			n = ep_handle_zerocopy_recv(self, conn, chunk, rep);

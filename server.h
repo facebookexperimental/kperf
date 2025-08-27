@@ -119,22 +119,18 @@ struct worker_state_iou {
 	int queue_id;
 };
 
-struct worker_main_args {
-	int fd;
+struct worker_opts {
 	enum kpm_rx_mode rx_mode;
 	enum kpm_tx_mode tx_mode;
-	struct memory_buffer *devmem;
 	bool validate;
-	int dmabuf_id;
-	bool iou;
-	unsigned int iou_rx_size_mb;
-	int ifindex;
-	int queue_id;
+	bool use_iou;
+	struct worker_state_devmem devmem;
+	struct worker_state_iou iou;
 };
 
 struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
-void NORETURN pworker_main(struct worker_main_args args);
+void NORETURN pworker_main(int fd, struct worker_opts opts);
 
 #endif /* SERVER_H */

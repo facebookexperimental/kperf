@@ -389,22 +389,14 @@ worker_recv_finished(struct worker_state *self, struct worker_connection *conn)
 
 /* == Main loop == */
 
-void NORETURN pworker_main(struct worker_main_args args)
+void NORETURN pworker_main(int fd, struct worker_opts opts)
 {
 	struct worker_state self = {
-		.main_sock = args.fd,
-		.rx_mode = args.rx_mode,
-		.tx_mode = args.tx_mode,
-		.validate = args.validate,
-		.devmem = { .mem = args.devmem, .dmabuf_id = args.dmabuf_id },
-		.iou = {
-			.rx_size_mb = args.iou_rx_size_mb,
-			.ifindex = args.ifindex,
-			.queue_id = args.queue_id,
-		},
+		.main_sock = fd,
+		.opts = opts,
 	};
 
-	if (args.iou)
+	if (opts.use_iou)
 		worker_iou_init(&self);
 	else
 		worker_epoll_init(&self);
