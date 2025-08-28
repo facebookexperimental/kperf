@@ -206,7 +206,7 @@ static void iou_handle_recv(struct worker_state *self, struct io_uring_cqe *cqe)
 	}
 
 	src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
-	if (self->validate && memcmp(conn->rxbuf, src, n))
+	if (self->opts.validate && memcmp(conn->rxbuf, src, n))
 		warnx("Data corruption %d %d %ld %lld %lld",
 		      *conn->rxbuf, *(char *)src, n,
 		      conn->tot_recv % PATTERN_PERIOD,
@@ -262,7 +262,7 @@ static void iou_handle_recvzc(struct worker_state *self, struct io_uring_cqe *cq
 	data = (unsigned char *)state->area_ptr + (rcqe->off & mask);
 
 	src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
-	if (self->validate && memcmp(data, src, n))
+	if (self->opts.validate && memcmp(data, src, n))
 		warnx("Data corruption %d %d %ld %lld %lld",
 		      *data, *(char *)src, n,
 		      conn->tot_recv % PATTERN_PERIOD,
@@ -397,7 +397,7 @@ static void iou_prep(struct worker_state *self)
 	p.flags |= IORING_SETUP_DEFER_TASKRUN;
 	p.flags |= IORING_SETUP_SINGLE_ISSUER;
 	p.flags |= IORING_SETUP_SUBMIT_ALL;
-	if (self->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
+	if (self->opts.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 		p.flags |= IORING_SETUP_CQE32;
 	p.cq_entries = 512;
 
@@ -411,11 +411,11 @@ static void iou_prep(struct worker_state *self)
 		err(6, "Failed to malloc iou_kpm_msg_state");
 	}
 
-	if (self->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
+	if (self->opts.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 		if (iou_register_zerocopy_rx(self))
 			err(7, "Failed to register zero copy rx");
 
-	if (self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY)
+	if (self->opts.tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY)
 		if (iou_register_zerocopy_tx(self))
 			err(8, "Failed to register zero copy tx");
 
@@ -555,13 +555,13 @@ static void iou_conn_add(struct worker_state *state, struct worker_connection *c
 	struct io_uring *ring = get_ring(state);
 
 	if (conn->to_send) {
-		if (state->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY)
+		if (state->opts.tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY)
 			iou_conn_add_sendzc(ring, conn);
 		else
 			iou_conn_add_send(ring, conn);
 	}
 
-	if (state->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
+	if (state->opts.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 		iou_conn_add_recvzc(ring, conn, get_iou_state(state)->zcrx_id);
 	else
 		iou_conn_add_recv(ring, conn);

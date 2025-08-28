@@ -68,9 +68,9 @@ ep_conn_close(struct worker_state *self, struct worker_connection *conn)
 	ev.data.fd = conn->fd;
 	if (epoll_ctl(self->epollfd, EPOLL_CTL_DEL, conn->fd, &ev) < 0)
 		warn("Failed to del poll out");
-	if (self->rx_mode == KPM_RX_MODE_DEVMEM)
+	if (self->opts.rx_mode == KPM_RX_MODE_DEVMEM)
 		(void)devmem_release_tokens(conn->fd, &conn->devmem);
-	else if (self->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
+	else if (self->opts.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 		munmap(conn->raddr, conn->rsize);
 }
 
@@ -80,14 +80,14 @@ ep_conn_add(struct worker_state *self, struct worker_connection *conn)
 	struct epoll_event ev = {};
 	int zc;
 
-	zc = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY || self->tx_mode == KPM_TX_MODE_DEVMEM;
+	zc = self->opts.tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY || self->opts.tx_mode == KPM_TX_MODE_DEVMEM;
 	if (setsockopt(conn->fd, SOL_SOCKET, SO_ZEROCOPY, &zc, sizeof(zc))) {
 		warnx("Failed to set SO_ZEROCOPY");
 		self->quit = 1;
 		return;
 	}
 
-	if (self->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY) {
+	if (self->opts.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY) {
 		size_t map_align;
 
 		map_align = default_huge_page_size();
@@ -229,7 +229,7 @@ ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 	       unsigned int events)
 {
 	unsigned int rep = max_t(int, 10, conn->to_send / conn->write_size + 1);
-	bool msg_zerocopy = self->tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY || self->tx_mode == KPM_TX_MODE_DEVMEM;
+	bool msg_zerocopy = self->opts.tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY || self->opts.tx_mode == KPM_TX_MODE_DEVMEM;
 	int flags = msg_zerocopy ? MSG_ZEROCOPY : 0;
 
 	while (rep--) {
@@ -239,7 +239,7 @@ ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 
 		chunk = min_t(size_t, conn->write_size, conn->to_send);
 
-		if (self->tx_mode == KPM_TX_MODE_DEVMEM) {
+		if (self->opts.tx_mode == KPM_TX_MODE_DEVMEM) {
 			n = devmem_sendmsg(conn->fd, self->opts.devmem.dmabuf_id,
 					   conn->tot_sent % PATTERN_PERIOD, chunk);
 		} else {
@@ -308,7 +308,7 @@ ep_handle_zerocopy_recv(struct worker_state *self, struct worker_connection *con
 		return zc.err;
 
 	if (zc.length) {
-		if (self->validate && memcmp(conn->addr, src, zc.length))
+		if (self->opts.validate && memcmp(conn->addr, src, zc.length))
 			warnx("Data corruption %d %d %u %lld %lld %d",
 			*(char *)conn->addr, *(char *)src, zc.length,
 			conn->tot_recv % PATTERN_PERIOD,
@@ -319,7 +319,7 @@ ep_handle_zerocopy_recv(struct worker_state *self, struct worker_connection *con
 	}
 
 	if (zc.copybuf_len) {
-		if (self->validate && memcmp(conn->rxbuf, src, zc.copybuf_len))
+		if (self->opts.validate && memcmp(conn->rxbuf, src, zc.copybuf_len))
 			warnx("Data corruption %d %d %d %lld %lld %d",
 			*conn->rxbuf, *(char *)src, zc.copybuf_len,
 			(conn->tot_recv + n) % PATTERN_PERIOD,
@@ -336,7 +336,7 @@ static ssize_t
 ep_handle_regular_recv(struct worker_state *self, struct worker_connection *conn,
 		       size_t chunk, int rep)
 {
-	bool msg_trunc = self->rx_mode == KPM_RX_MODE_SOCKET_TRUNC;
+	bool msg_trunc = self->opts.rx_mode == KPM_RX_MODE_SOCKET_TRUNC;
 	void *src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
 	int flags = msg_trunc ? MSG_TRUNC : 0;
 	ssize_t n;
@@ -346,7 +346,7 @@ ep_handle_regular_recv(struct worker_state *self, struct worker_connection *conn
 	if (n <= 0 || msg_trunc)
 		return n;
 
-	if (self->validate && memcmp(conn->rxbuf, src, n))
+	if (self->opts.validate && memcmp(conn->rxbuf, src, n))
 		warnx("Data corruption %d %d %ld %lld %lld %d",
 		      *conn->rxbuf, *(char *)src, n,
 		      conn->tot_recv % PATTERN_PERIOD,
@@ -365,11 +365,11 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 		ssize_t n;
 
 		chunk = min_t(size_t, conn->read_size, conn->to_recv);
-		if (self->rx_mode == KPM_RX_MODE_DEVMEM)
+		if (self->opts.rx_mode == KPM_RX_MODE_DEVMEM)
 			n = devmem_recv(conn->fd, &conn->devmem,
 					conn->rxbuf, chunk, self->opts.devmem.mem,
-					rep, conn->tot_recv, self->validate);
-		else if (self->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
+					rep, conn->tot_recv, self->opts.validate);
+		else if (self->opts.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 			n = ep_handle_zerocopy_recv(self, conn, chunk, rep);
 		else
 			n = ep_handle_regular_recv(self, conn, chunk, rep);
