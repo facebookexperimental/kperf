@@ -98,6 +98,8 @@ struct session_state_devmem {
 	__u32 dmabuf_tx_size_mb;
 	enum memory_provider_type tx_provider;
 	struct sockaddr_in6 addr;
+	int ctx_kpm_fd;
+	pid_t ctx_pid;
 };
 
 struct worker_state_devmem {

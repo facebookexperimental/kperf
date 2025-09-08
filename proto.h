@@ -36,6 +36,7 @@ enum kpm_msg_type {
 	KPM_MSG_WORKER_TEST,
 	KPM_MSG_WORKER_END_TEST,
 	KPM_MSG_WORKER_TEST_RESULT,
+	KPM_MSG_WORKER_CUDA_INIT_DONE,
 
 	__KPM_MSG_TOTAL,
 
@@ -175,6 +176,11 @@ enum kpm_tls_mask {
 	KPM_TLS_TX = 2,
 	KPM_TLS_RX = 4,
 	KPM_TLS_NOPAD = 8,
+};
+
+struct kpm_cuda_init_done {
+	struct kpm_header hdr;
+	int status;
 };
 
 struct kpm_tls {
@@ -326,5 +332,6 @@ int kpm_req_pacing(int fd, __u32 conn_id, __u32 max_pace);
 int kpm_req_tcp_cc(int fd, __u32 conn_id, char *cc_name);
 int kpm_req_mode(int fd, struct kpm_mode *mode);
 int kpm_req_disconnect(int fd, __u32 connection_id);
+int kpm_send_cuda_init_done(int fd, struct kpm_cuda_init_done *args);
 
 #endif /* PROTO_H */

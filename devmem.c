@@ -15,6 +15,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
 #include <linux/dma-buf.h>
 #include <linux/ethtool_netlink.h>
@@ -41,9 +42,28 @@
 #endif
 #endif
 
+enum cuda_opt_type {
+	CUDA_OPT_TYPE_SETUP_RX,
+	CUDA_OPT_TYPE_SETUP_TX,
+	CUDA_OPT_TYPE_TEARDOWN_RX,
+	CUDA_OPT_TYPE_TEARDOWN_TX,
+};
+
+struct cuda_ctx_worker_opts {
+	enum cuda_opt_type type;
+	int kpm_fd;
+	pid_t pid;
+};
+
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
 static int steering_rule_loc = -1;
+
+static int devmem_spawn_cuda_ctx_worker(struct session_state_devmem *devmem,
+					struct cuda_ctx_worker_opts *opts);
+
+static int devmem_free_cuda_ctx_worker(struct session_state_devmem *devmem,
+				       struct cuda_ctx_worker_opts *opts);
 
 static int ethtool(const char *ifname, void *data)
 {
@@ -809,11 +829,18 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		 enum memory_provider_type provider,
 		 struct pci_dev *dev)
 {
+	struct cuda_ctx_worker_opts opts = {
+		.type = CUDA_OPT_TYPE_SETUP_RX,
+	};
 	struct netdev_queue_id *queues;
 	struct ynl_error yerr;
 	int max_kernel_queue;
 	int ifindex;
 	int ret;
+
+	ret = devmem_spawn_cuda_ctx_worker(devmem, &opts);
+	if (ret)
+		return ret;
 
 	ret = reserve_queues(fd, num_queues, devmem->ifname, &ifindex,
 			     &max_kernel_queue, &devmem->rss_context);
@@ -883,11 +910,18 @@ undo_queues:
 
 int devmem_teardown(struct session_state_devmem *devmem)
 {
+	struct cuda_ctx_worker_opts opts = {
+		.type = CUDA_OPT_TYPE_TEARDOWN_RX,
+	};
+
 	unreserve_queues(devmem->ifname, devmem->rss_context);
 	if (devmem->ys)
 		ynl_sock_destroy(devmem->ys);
 	if (rxmp)
 		rxmp->free(devmem->mem);
+
+	devmem_free_cuda_ctx_worker(devmem, &opts);
+
 	return 0;
 }
 
@@ -1072,10 +1106,17 @@ int devmem_bind_socket(struct session_state_devmem *devmem, int fd)
 int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_type provider,
 		    int dmabuf_tx_size_mb, struct pci_dev *dev, struct sockaddr_in6 *addr)
 {
+	struct cuda_ctx_worker_opts opts = {
+		.type = CUDA_OPT_TYPE_SETUP_TX,
+	};
 	char ifname[IFNAMSIZ] = {};
 	struct ynl_error yerr;
 	int ifindex;
 	int ret;
+
+	ret = devmem_spawn_cuda_ctx_worker(devmem, &opts);
+	if (ret)
+		return ret;
 
 	devmem->tx_provider = provider;
 	devmem->dmabuf_tx_size_mb = dmabuf_tx_size_mb;
@@ -1127,6 +1168,10 @@ sock_destroy:
 
 void devmem_teardown_tx(struct session_state_devmem *devmem)
 {
+	struct cuda_ctx_worker_opts opts = {
+		.type = CUDA_OPT_TYPE_TEARDOWN_TX,
+	};
+
 	if (txmp && devmem->tx_mem) {
 		txmp->free(devmem->tx_mem);
 		devmem->tx_mem = NULL;
@@ -1136,4 +1181,134 @@ void devmem_teardown_tx(struct session_state_devmem *devmem)
 		ynl_sock_destroy(devmem->ys);
 		devmem->ys = NULL;
 	}
+
+	devmem_free_cuda_ctx_worker(devmem, &opts);
+}
+
+static void devmem_cuda_ctx_worker_main(struct cuda_ctx_worker_opts *opts)
+{
+	struct kpm_header *hdr = NULL;
+	int fd = opts->kpm_fd;
+
+	kpm_dbg("cuda_ctx worker waiting for message pid=%d", getpid());
+
+	hdr = kpm_receive(fd);
+	if (!hdr) {
+		kpm_dbg("cuda_ctx recv no msg");
+		return;
+	}
+
+	/* only KPM_MSG_WORKER_KILL will be received */
+	kpm_dbg("cuda_ctx worker recv msg type: %d", hdr->type);
+
+	free(hdr);
+}
+
+static int devmem_worker_setup_cuda_ctx(struct session_state_devmem *devmem,
+					struct cuda_ctx_worker_opts *opts)
+{
+	struct kpm_cuda_init_done init_done;
+
+	kpm_dbg("cuda_ctx worker pid=%d is setting up cuda.", getpid());
+
+	memset(&init_done, 0, sizeof(init_done));
+	init_done.status = 0x5a5a;
+
+	kpm_dbg("cuda_ctx worker pid=%d is notifying session cuda_init is done. status=0x%x", getpid(), init_done.status);
+	if (kpm_send_cuda_init_done(opts->kpm_fd, &init_done) < 1) {
+		warnx("Notify cuda_init done fail");
+		return -1;
+	}
+
+	kpm_dbg("cuda_ctx worker pid=%d entering main loop.", getpid());
+
+	devmem_cuda_ctx_worker_main(opts);
+
+	return 0;
+}
+
+static int devmem_store_cuda_ctx(struct session_state_devmem *devmem,
+				 struct cuda_ctx_worker_opts *opts)
+{
+	struct kpm_cuda_init_done *init_done = NULL;
+
+	kpm_dbg("server session pid=%d waiting for cuda_ctx from worker pid=%d.", getpid(), opts->pid);
+
+	init_done = kpm_receive(opts->kpm_fd);
+	if (!init_done) {
+		warnx("No init_done notification from cuda_ctx worker pid=%d", opts->pid);
+		goto err_worker_kill;
+	}
+
+	if (!kpm_good_req(init_done, KPM_MSG_WORKER_CUDA_INIT_DONE)) {
+		warnx("Invalid KPM_MSG_WORKER_CUDA_INIT_DONE ack type=%d len=%d", init_done->hdr.type, init_done->hdr.len);
+		goto err_worker_kill;
+	}
+
+	kpm_dbg("server session pid=%d cuda_ctx saved. status=0x%x", getpid(), init_done->status);
+	devmem->ctx_kpm_fd = opts->kpm_fd;
+	devmem->ctx_pid = opts->pid;
+
+	free(init_done);
+	return 0;
+
+err_worker_kill:
+	kpm_send_empty(opts->kpm_fd, KPM_MSG_WORKER_KILL);
+	waitpid(opts->pid, NULL, 0);
+	close(opts->kpm_fd);
+	if (init_done)
+		free(init_done);
+
+	return -1;
+}
+
+static int devmem_spawn_cuda_ctx_worker(struct session_state_devmem *devmem,
+					struct cuda_ctx_worker_opts *opts)
+{
+	int p[2], ret = 0;
+	pid_t pid = 0;
+
+	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, p) < 0) {
+		warn("create socketpair fail");
+		return -1;
+	}
+
+	pid = fork();
+	if (pid < 0) {
+		warn("Failed to fork");
+		close(p[0]);
+		close(p[1]);
+		return -1;
+	}
+
+	if (!pid) {
+		close(p[0]);
+		opts->kpm_fd = p[1];
+		ret = devmem_worker_setup_cuda_ctx(devmem, opts);
+		kpm_dbg("cuda_ctx worker pid=%d exiting. ret=%d", getpid(), ret);
+		if (ret != 0)
+			exit(1);
+		else
+			exit(0);
+	}
+
+	close(p[1]);
+	opts->kpm_fd = p[0];
+	opts->pid = pid;
+
+	kpm_dbg("server session pid=%d spawn cuda_ctx worker pid=%d.", getpid(), pid);
+
+	return devmem_store_cuda_ctx(devmem, opts);
+}
+
+static int devmem_free_cuda_ctx_worker(struct session_state_devmem *devmem,
+				       struct cuda_ctx_worker_opts *opts)
+{
+	kpm_dbg("server session pid=%d freeing cuda_ctx worker. type=%d", getpid(), opts->type);
+	if (devmem->ctx_pid > 0) {
+		kpm_send_empty(devmem->ctx_kpm_fd, KPM_MSG_WORKER_KILL);
+		waitpid(devmem->ctx_pid, NULL, 0);
+		close(devmem->ctx_kpm_fd);
+	}
+	return 0;
 }

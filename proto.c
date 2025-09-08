@@ -195,6 +195,11 @@ int kpm_send_pin_worker(int fd, __u32 id, __u32 cpu)
 	return kpm_send(fd, &msg.hdr, sizeof(msg), KPM_MSG_TYPE_PIN_WORKER);
 }
 
+int kpm_send_cuda_init_done(int fd, struct kpm_cuda_init_done *args)
+{
+	return kpm_send(fd, &args->hdr, sizeof(*args), KPM_MSG_WORKER_CUDA_INIT_DONE);
+}
+
 static int kpm_reply(int fd, struct kpm_header *msg, size_t size,
 		     struct kpm_header *req)
 {
