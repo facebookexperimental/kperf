@@ -20,6 +20,9 @@
 #include "tcp.h"
 #include "iou.h"
 #include "epoll.h"
+#ifdef USE_CUDA
+#include <cuda_runtime.h>
+#endif
 
 unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
@@ -410,7 +413,27 @@ void NORETURN pworker_main(struct worker_main_args args)
 		worker_epoll_init(&self);
 
 	list_head_init(&self.connections);
-
+#ifdef USE_CUDA
+	if (args.devmem && args.devmem->provider == MEMORY_PROVIDER_CUDA)
+	{
+		if (cudaIpcOpenMemHandle((void**)&self.devmem.mem->buf_mem, self.devmem.mem->cuda.handle,
+				cudaIpcMemLazyEnablePeerAccess) == cudaSuccess) {
+			if (args.validate) {
+				self.devmem.mem->cuda.host_buf = malloc(CUDA_VALIDATION_BUF_SIZE);
+				if (self.devmem.mem->cuda.host_buf) {
+					self.devmem.mem->cuda.host_buf_size = CUDA_VALIDATION_BUF_SIZE;
+				} else {
+					warnx("malloc cuda validation host_buf failed");
+					self.quit = 1;
+				}
+			}
+		} else {
+			warnx("cudaIpcOpenMemHandle failed");
+			self.devmem.mem->buf_mem = NULL;
+			self.quit = 1;
+		}
+	}
+#endif
 	self.ops->prep(&self);
 
 	while (!self.quit) {
@@ -430,6 +453,39 @@ void NORETURN pworker_main(struct worker_main_args args)
 	}
 
 	self.ops->exit(&self);
+#ifdef USE_CUDA
+	if (args.devmem && args.devmem->provider == MEMORY_PROVIDER_CUDA)
+	{
+		if (self.devmem.mem->buf_mem &&
+			cudaIpcCloseMemHandle(self.devmem.mem->buf_mem) != cudaSuccess)
+		{
+			warnx("cudaIpcCloseMemHandle failed");
+		}
+		if (self.devmem.mem->cuda.host_buf) {
+			free(self.devmem.mem->cuda.host_buf);
+			self.devmem.mem->cuda.host_buf_size = 0;
+		}
+	}
+#endif
 	kpm_dbg("exiting!");
 	exit(0);
+}
+
+void cuda_ctx_worker_main(struct cuda_ctx_worker_main_args args)
+{
+	struct worker_state self = {
+		.main_sock = args.fd,
+		.id = args.wrk_id
+	};
+
+	worker_epoll_init(&self);
+	list_head_init(&self.connections);
+	self.ops->prep(&self);
+
+	while (!self.quit) {
+		self.ops->wait(&self, -1);
+	}
+
+	self.ops->exit(&self);
+	kpm_dbg("exiting!");
 }

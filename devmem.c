@@ -466,6 +466,7 @@ static struct memory_buffer *udmabuf_alloc(size_t size)
 	}
 
 	mem->size = size;
+	mem->provider = MEMORY_PROVIDER_HOST;
 	mem->buf_mem = mmap(NULL, mem->size, PROT_READ | PROT_WRITE,
 				  MAP_SHARED, mem->fd, 0);
 
@@ -588,7 +589,6 @@ static int cuda_find_device(__u16 domain, __u8 bus, __u8 device)
 
 static int cuda_dev_init(struct pci_dev *dev)
 {
-	struct cudaDeviceProp deviceProp;
 	CUdevice cuda_dev;
 	int devnum;
 	int ret;
@@ -627,8 +627,8 @@ static int cuda_dev_init(struct pci_dev *dev)
 	}
 
 	if (verbose >= 4)
-		fprintf(stderr, "cuda: tid %d selecting device %d (%s)\n",
-			getpid(), devnum, deviceProp.name);
+		fprintf(stderr, "cuda: tid %d selecting device %d\n",
+			getpid(), devnum);
 
 	return 0;
 }
@@ -637,8 +637,6 @@ static struct memory_buffer *cuda_alloc(size_t size)
 {
 	struct memory_buffer *mem;
 	size_t page_size;
-	CUdevice dev;
-	int devnum;
 	int ret;
 
 	page_size = sysconf(_SC_PAGESIZE);
@@ -650,24 +648,17 @@ static struct memory_buffer *cuda_alloc(size_t size)
 	mem = calloc(1, sizeof(*mem));
 	if (!mem)
 		return NULL;
-
-	ret = cudaGetDevice(&devnum);
-	if (ret != cudaSuccess)
-		goto free_mem;
-
-	ret = cuDeviceGet(&dev, devnum);
-	if (ret != CUDA_SUCCESS)
-		goto free_mem;
-
-	ret = cuCtxCreate(&mem->cuda.ctx, 0, dev);
-	if (ret != CUDA_SUCCESS)
-		goto free_mem;
-
+	memset(mem, 0, sizeof(*mem));
 	mem->size = size;
+	mem->provider = MEMORY_PROVIDER_CUDA;
 
-	ret = cuMemAlloc((CUdeviceptr *)&mem->buf_mem, size);
+	ret = cudaMalloc((void *)&mem->buf_mem, size);
 	if (ret != CUDA_SUCCESS)
-		goto destroy_ctx;
+		goto free_mem;
+
+	ret = cudaIpcGetMemHandle(&mem->cuda.handle, mem->buf_mem);
+	if (ret != CUDA_SUCCESS)
+		goto free_cuda;
 
 	ret = cuMemGetHandleForAddressRange((void *)&mem->fd, ((CUdeviceptr)mem->buf_mem),
 					    size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
@@ -678,11 +669,8 @@ static struct memory_buffer *cuda_alloc(size_t size)
 	return mem;
 
 free_cuda:
-	if (cuMemFree((CUdeviceptr)mem->buf_mem) != CUDA_SUCCESS)
-		warnx("cuMemFree() failed");
-destroy_ctx:
-	if (cuCtxDestroy(mem->cuda.ctx) != CUDA_SUCCESS)
-		warnx("cuCtxDestroy() failed");
+	if (cudaFree(mem->buf_mem) != cudaSuccess)
+		warnx("cudaFree() failed");
 free_mem:
 	free(mem);
 
@@ -693,12 +681,8 @@ static void cuda_free(struct memory_buffer *mem)
 {
 	if (mem->fd)
 		close(mem->fd);
-	if (mem->buf_mem) {
-		munmap(mem->buf_mem, mem->size);
-		cuMemFree((CUdeviceptr)mem->buf_mem);
-	}
-
-	cuCtxDestroy(mem->cuda.ctx);
+	if (mem->buf_mem)
+		cudaFree(mem->buf_mem);
 	free(mem);
 }
 
@@ -707,9 +691,9 @@ void cuda_memcpy_to_device(struct memory_buffer *dst, size_t off,
 {
 	int ret;
 
-	ret = cuMemcpyHtoD((CUdeviceptr)(dst->buf_mem + off), src, n);
+	ret = cudaMemcpy((void *)(dst->buf_mem + off), src, n, cudaMemcpyHostToDevice);
 	if (ret != CUDA_SUCCESS)
-		warnx("cuMemcpyHtoD() failed");
+		warnx("cudaMemcpy() failed");
 }
 
 static struct memory_provider cuda_memory_provider = {
@@ -878,9 +862,9 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		queues[i].id = max_kernel_queue + i;
 	}
 
-        devmem->mem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem->fd, queues,
-                                          num_queues, devmem->ys);
-        if (devmem->mem->dmabuf_id < 0) {
+	devmem->mem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem->fd, queues,
+										num_queues, devmem->ys);
+	if (devmem->mem->dmabuf_id < 0) {
 		warnx("Failed to bind RX queue");
 		ret = -1;
 		goto free_queues;
@@ -930,42 +914,87 @@ int devmem_release_tokens(int fd, struct connection_devmem *conn)
 	return ret;
 }
 
-static int devmem_validate_token(struct memory_buffer *mem,
-				 struct cmsghdr *cm, int rep, __u64 *tot_recv)
+static int devmem_validate_host(struct memory_buffer *mem, __u64 offset,
+				 				__u32 pat_start, __u32 size)
 {
-	struct dmabuf_cmsg *dmabuf_cmsg = (struct dmabuf_cmsg *)CMSG_DATA(cm);
 	struct dma_buf_sync sync = {};
-	size_t start;
-	void *pat;
-	int ret;
-
-	start = *tot_recv % PATTERN_PERIOD;
-	if (start + dmabuf_cmsg->frag_size > ARRAY_SIZE(patbuf)) {
-		warnx("dmabuf fragment size too big");
-		return -1;
-	}
+	void *pat = NULL;
+	int ret = 0;
 
 	sync.flags = DMA_BUF_SYNC_START;
 	ioctl(mem->fd, DMA_BUF_IOCTL_SYNC, &sync);
 
-	pat = &patbuf[start];
-	/* TODO: memory_provider for CUDA case? */
-	ret = memcmp(pat, mem->buf_mem + dmabuf_cmsg->frag_offset, dmabuf_cmsg->frag_size);
+	pat = &patbuf[pat_start];
+	ret = memcmp(pat, mem->buf_mem + offset, size);
 
 	sync.flags = DMA_BUF_SYNC_END;
 	ioctl(mem->fd, DMA_BUF_IOCTL_SYNC, &sync);
 
 	if (ret) {
-		warnx("Data corruption %d %d %d %lld %lld %d",
-		      *(char *)mem->buf_mem, *(char *)pat, dmabuf_cmsg->frag_size,
-		      *tot_recv % PATTERN_PERIOD,
-		      *tot_recv, rep);
+		warnx("Data corruption %d %d %d %d",
+		      *(char *)mem->buf_mem, *(char *)pat, size, pat_start);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int devmem_validate_cuda(struct memory_buffer *mem, __u64 offset,
+				 				__u32 pat_start, __u32 size)
+{
+#ifdef USE_CUDA
+	void *pat = NULL, *hostbuf = NULL;
+	int ret = 0;
+
+	if (size > mem->cuda.host_buf_size) {
+		warnx("validate size=%d larger than host_buf_size=%ld", size, mem->cuda.host_buf_size);
+		return -1;
+	}
+
+	hostbuf = mem->cuda.host_buf;
+    ret = cudaMemcpy(hostbuf, (void *)(mem->buf_mem + offset), size, cudaMemcpyDeviceToHost);
+	if (ret != CUDA_SUCCESS) {
+		warnx("cudaMemcpyDeviceToHost failed rc=%d", ret);
+		return -1;
+	}
+
+	pat = &patbuf[pat_start];
+	ret = memcmp(pat, hostbuf, size);
+	if (ret) {
+		warnx("Data corruption %d %d %d %d",
+		      *(char *)hostbuf, *(char *)pat, size, pat_start);
+		return -1;
+	}
+#endif
+
+	return 0;
+}
+
+static int devmem_validate_token(struct memory_buffer *mem,
+				 struct cmsghdr *cm, int rep, __u64 *tot_recv)
+{
+	struct dmabuf_cmsg *dmabuf_cmsg = (struct dmabuf_cmsg *)CMSG_DATA(cm);
+	size_t start = 0;
+	int ret = 0;
+
+	start = *tot_recv % PATTERN_PERIOD;
+	if (start + dmabuf_cmsg->frag_size > ARRAY_SIZE(patbuf)) {
+		warnx("dmabuf fragment size too big rep=%d", rep);
+		return -1;
+	}
+
+	if (mem->provider == MEMORY_PROVIDER_CUDA) {
+		ret = devmem_validate_cuda(mem, dmabuf_cmsg->frag_offset, start, dmabuf_cmsg->frag_size);
+	} else {
+		ret = devmem_validate_host(mem, dmabuf_cmsg->frag_offset, start, dmabuf_cmsg->frag_size);
+	}
+	if (ret) {
+		warnx("token validation failed rep=%d rc=%d", rep, ret);
 		return -1;
 	}
 
 	*tot_recv += dmabuf_cmsg->frag_size;
-
-	return 0;
+	return ret;
 }
 
 static int devmem_handle_token(int fd, struct connection_devmem *conn,

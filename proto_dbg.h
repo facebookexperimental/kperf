@@ -6,6 +6,8 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "proto.h"
 

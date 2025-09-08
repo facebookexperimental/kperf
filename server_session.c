@@ -49,6 +49,7 @@ struct session_state {
 	struct session_state_iou iou_state;
 	bool validate;
 	bool iou;
+	struct pworker *cuda_ctx_worker;
 };
 
 struct connection {
@@ -509,6 +510,151 @@ err_quit:
 	self->quit = 1;
 }
 
+static void NORETURN server_session_worker_setup_cuda_ctx(struct session_state *self,
+				struct kpm_mode *req, bool is_rx, int fd)
+{
+	int ret = 0;
+	struct kpm_cuda_init_done init_done;
+	struct cuda_ctx_worker_main_args args = {
+		.fd = fd,
+		.wrk_id = CUDA_CTX_WORKER_ID,
+	};
+
+	if (is_rx) {
+		ret = devmem_setup(&self->devmem, self->tcp_sock, req->dmabuf_rx_size_mb,
+				req->num_rx_queues, req->rx_provider,
+				&req->dev);
+	} else {
+		ret = devmem_setup_tx(&self->devmem, req->tx_provider, req->dmabuf_tx_size_mb,
+					&req->dev, &req->addr);
+	}
+	if (ret < 0) {
+		warnx("Failed to setup devmem");
+		exit(1);
+	}
+
+	memset(&init_done, 0, sizeof(init_done));
+#ifdef USE_CUDA
+	if (is_rx) {
+		init_done.ipc_mem_handle = self->devmem.mem->cuda.handle;
+		init_done.dmabuf_id = self->devmem.mem->dmabuf_id;
+	} else {
+		init_done.ipc_mem_handle = self->devmem.tx_mem->cuda.handle;
+		init_done.dmabuf_id = self->devmem.tx_mem->dmabuf_id;
+	}
+#endif
+
+	if (kpm_send_cuda_init_done(args.fd, &init_done) < 1) {
+		warnx("Notify cuda_init done fail");
+		if (is_rx)
+			devmem_teardown(&self->devmem);
+		else
+			devmem_teardown_tx(&self->devmem);
+		exit(1);
+	}
+
+	cuda_ctx_worker_main(args);
+
+	if (is_rx)
+		devmem_teardown(&self->devmem);
+	else
+		devmem_teardown_tx(&self->devmem);
+	exit(0);
+}
+
+static int server_session_server_store_cuda_ctx(struct session_state *self,
+				struct kpm_mode *req, bool is_rx, int fd, pid_t pid)
+{
+	struct kpm_cuda_init_done *init_done = NULL;
+	struct memory_buffer *mem = NULL;
+	struct pworker *pwrk = NULL;
+
+	pwrk = malloc(sizeof(*pwrk));
+	if (!pwrk) {
+		warn("malloc pworker fail");
+		goto err_worker_kill;
+	}
+	memset(pwrk, 0, sizeof(*pwrk));
+	pwrk->fd = fd;
+	pwrk->pid = pid;
+
+	init_done = kpm_receive(pwrk->fd);
+	if (!init_done) {
+		warnx("No init_done notification from cuda_ctx worker pid=%d", pid);
+		goto err_worker_kill;
+	}
+
+	if (!kpm_good_req(init_done, KPM_MSG_WORKER_CUDA_INIT_DONE)) {
+		warnx("Invalid KPM_MSG_WORKER_CUDA_INIT_DONE ack type=%d len=%d", init_done->hdr.type, init_done->hdr.len);
+		goto err_worker_kill;
+	}
+
+	mem = malloc(sizeof(struct memory_buffer));
+	if (!mem) {
+		warnx("malloc memory_buffer fail");
+		goto err_worker_kill;
+	}
+	memset(mem, 0, sizeof(struct memory_buffer));
+#ifdef USE_CUDA
+	mem->cuda.handle = init_done->ipc_mem_handle;
+#endif
+	mem->provider = MEMORY_PROVIDER_CUDA;
+	mem->dmabuf_id = init_done->dmabuf_id;
+
+	if (is_rx) {
+		mem->size = req->dmabuf_rx_size_mb * 1024 * 1024;
+		self->devmem.mem = mem;
+	} else {
+		mem->size = req->dmabuf_tx_size_mb * 1024 * 1024;
+		self->devmem.tx_mem = mem;
+		self->devmem.tx_provider = MEMORY_PROVIDER_CUDA;
+		self->devmem.dmabuf_tx_size_mb = req->dmabuf_tx_size_mb;
+		memcpy(&self->devmem.tx_dev, &req->dev, sizeof(self->devmem.tx_dev));
+		memcpy(&self->devmem.addr, &req->addr, sizeof(self->devmem.addr));
+	}
+
+	self->cuda_ctx_worker = pwrk;
+	free(init_done);
+	return 0;
+
+err_worker_kill:
+	kpm_send_empty(pwrk->fd, KPM_MSG_WORKER_KILL);
+	if (init_done)
+		free(init_done);
+	if (pwrk)
+		free(pwrk);
+
+	return -1;
+}
+
+static int server_session_spawn_cuda_ctx_worker(struct session_state *self, struct kpm_mode *req, bool is_rx)
+{
+	int p[2];
+	pid_t pid = 0;
+
+	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, p) < 0) {
+		warn("create socketpair fail");
+		return -1;
+	}
+
+	pid = fork();
+	if (pid < 0) {
+		warn("Failed to fork");
+		close(p[0]);
+		close(p[1]);
+		return -1;
+	}
+
+	if (!pid) {
+		close(p[0]);
+		server_session_worker_setup_cuda_ctx(self, req, is_rx, p[1]);
+		exit(1);
+	}
+
+	close(p[1]);
+	return server_session_server_store_cuda_ctx(self, req, is_rx, p[0], pid);
+}
+
 static void
 server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 {
@@ -522,9 +668,12 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	req = (void *)hdr;
 
 	if (self->tcp_sock && req->rx_mode == KPM_RX_MODE_DEVMEM) {
-		ret = devmem_setup(&self->devmem, self->tcp_sock, req->dmabuf_rx_size_mb,
-				   req->num_rx_queues, req->rx_provider,
-				   &req->dev);
+		if (req->rx_provider == MEMORY_PROVIDER_CUDA)
+			ret = server_session_spawn_cuda_ctx_worker(self, req, true);
+		else
+			ret = devmem_setup(&self->devmem, self->tcp_sock, req->dmabuf_rx_size_mb,
+					req->num_rx_queues, req->rx_provider, &req->dev);
+
 		if (ret < 0) {
 			warnx("Failed to setup devmem");
 			self->quit = 1;
@@ -547,8 +696,12 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	self->iou_state.rx_size_mb = req->iou_rx_size_mb;
 
 	if (!self->tcp_sock && (req->tx_mode == KPM_TX_MODE_DEVMEM)) {
-		ret = devmem_setup_tx(&self->devmem, req->tx_provider, req->dmabuf_tx_size_mb,
-				      &req->dev, &req->addr);
+		if (req->tx_provider == MEMORY_PROVIDER_CUDA)
+			ret = server_session_spawn_cuda_ctx_worker(self, req, false);
+		else
+			ret = devmem_setup_tx(&self->devmem, req->tx_provider, req->dmabuf_tx_size_mb,
+						&req->dev, &req->addr);
+
 		if (ret < 0) {
 			warnx("Failed to setup devmem tx");
 			self->quit = 1;
@@ -1074,10 +1227,18 @@ static void server_session_loop(int fd)
 		list_del(&conn->connections);
 		free(conn);
 	}
-	if (self.tcp_sock && self.rx_mode == KPM_RX_MODE_DEVMEM)
-		devmem_teardown(&self.devmem);
-	if (!self.tcp_sock && self.tx_mode == KPM_TX_MODE_DEVMEM)
-		devmem_teardown_tx(&self.devmem);
+	if (self.tcp_sock && self.rx_mode == KPM_RX_MODE_DEVMEM) {
+		if (self.cuda_ctx_worker)
+			kpm_send_empty(self.cuda_ctx_worker->fd, KPM_MSG_WORKER_KILL);
+		else
+			devmem_teardown(&self.devmem);
+	}
+	if (!self.tcp_sock && self.tx_mode == KPM_TX_MODE_DEVMEM) {
+		if (self.cuda_ctx_worker)
+			kpm_send_empty(self.cuda_ctx_worker->fd, KPM_MSG_WORKER_KILL);
+		else
+			devmem_teardown_tx(&self.devmem);
+	}
 	if (self.tcp_sock && self.iou && self.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 		iou_zerocopy_rx_teardown(&self.iou_state);
 }

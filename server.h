@@ -17,9 +17,12 @@
 
 #ifdef USE_CUDA
 #include <cuda.h>
+#include <cuda_runtime.h>
 #endif
 
 #define PATTERN_PERIOD 255
+#define CUDA_CTX_WORKER_ID 65535
+#define CUDA_VALIDATION_BUF_SIZE (2*1024*1024)	/* 2MB */
 
 struct server_session {
 	int cfd;
@@ -48,23 +51,24 @@ struct dmabuf_token {
 	__u32 token_count;
 };
 
-#ifdef USE_CUDA
 struct memory_buffer_cuda {
-	CUcontext ctx;
-};
+	char *host_buf;
+	size_t host_buf_size;
+#ifdef USE_CUDA
+	cudaIpcMemHandle_t handle;
 #endif
+};
 
 struct memory_buffer {
 	char *buf_mem;
 	size_t size;
+	enum memory_provider_type provider;
 	int fd;
 	int devfd;
 	int memfd;
 	int dmabuf_id;
 	void *priv;
-#ifdef USE_CUDA
 	struct memory_buffer_cuda cuda;
-#endif
 };
 
 struct memory_provider {
@@ -132,9 +136,15 @@ struct worker_main_args {
 	int queue_id;
 };
 
+struct cuda_ctx_worker_main_args {
+	int fd;
+	unsigned int wrk_id;
+};
+
 struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
 void NORETURN pworker_main(struct worker_main_args args);
+void cuda_ctx_worker_main(struct cuda_ctx_worker_main_args args);
 
 #endif /* SERVER_H */
