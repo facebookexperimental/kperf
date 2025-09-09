@@ -11,6 +11,10 @@
 #include <sys/socket.h>
 #include <stdbool.h>
 
+#ifdef USE_CUDA
+#include <cuda_runtime.h>
+#endif
+
 #define KPERF_MAX_CPUS	1024
 
 enum kpm_msg_type {
@@ -180,7 +184,10 @@ enum kpm_tls_mask {
 
 struct kpm_cuda_init_done {
 	struct kpm_header hdr;
-	int status;
+#ifdef USE_CUDA
+	cudaIpcMemHandle_t ipc_mem_handle;
+#endif
+	int dmabuf_id;
 };
 
 struct kpm_tls {

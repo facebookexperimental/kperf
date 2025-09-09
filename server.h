@@ -17,6 +17,7 @@
 
 #ifdef USE_CUDA
 #include <cuda.h>
+#include <cuda_runtime.h>
 #endif
 
 #define PATTERN_PERIOD 255
@@ -48,23 +49,24 @@ struct dmabuf_token {
 	__u32 token_count;
 };
 
-#ifdef USE_CUDA
 struct memory_buffer_cuda {
-	CUcontext ctx;
-};
+	pid_t ctx_pid;
+	int ctx_kpm_fd;
+#ifdef USE_CUDA
+	cudaIpcMemHandle_t handle;
 #endif
+};
 
 struct memory_buffer {
 	char *buf_mem;
 	size_t size;
+	enum memory_provider_type provider;
 	int fd;
 	int devfd;
 	int memfd;
 	int dmabuf_id;
 	void *priv;
-#ifdef USE_CUDA
 	struct memory_buffer_cuda cuda;
-#endif
 };
 
 struct memory_provider {
@@ -91,6 +93,7 @@ struct session_state_devmem {
 	/* RX */
 	struct memory_buffer *mem;
 	int rss_context;
+	enum memory_provider_type rx_provider;
 
 	/* TX */
 	struct memory_buffer *tx_mem;
@@ -98,8 +101,6 @@ struct session_state_devmem {
 	__u32 dmabuf_tx_size_mb;
 	enum memory_provider_type tx_provider;
 	struct sockaddr_in6 addr;
-	int ctx_kpm_fd;
-	pid_t ctx_pid;
 };
 
 struct worker_state_devmem {

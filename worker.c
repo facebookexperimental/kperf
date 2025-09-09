@@ -395,6 +395,7 @@ void NORETURN pworker_main(int fd, struct worker_opts opts)
 		.main_sock = fd,
 		.opts = opts,
 	};
+	struct memory_buffer *mem = self.opts.devmem.mem;
 
 	if (opts.use_iou)
 		worker_iou_init(&self);
@@ -402,7 +403,16 @@ void NORETURN pworker_main(int fd, struct worker_opts opts)
 		worker_epoll_init(&self);
 
 	list_head_init(&self.connections);
-
+#ifdef USE_CUDA
+	if (mem && mem->provider == MEMORY_PROVIDER_CUDA) {
+		if (cudaIpcOpenMemHandle((void**)&mem->buf_mem, mem->cuda.handle,
+					 cudaIpcMemLazyEnablePeerAccess) != cudaSuccess) {
+			warnx("cudaIpcOpenMemHandle failed");
+			mem->buf_mem = NULL;
+			self.quit = 1;
+		}
+	}
+#endif
 	self.ops->prep(&self);
 
 	while (!self.quit) {
@@ -422,6 +432,13 @@ void NORETURN pworker_main(int fd, struct worker_opts opts)
 	}
 
 	self.ops->exit(&self);
+#ifdef USE_CUDA
+	if (mem && mem->provider == MEMORY_PROVIDER_CUDA) {
+		if (mem->buf_mem && cudaIpcCloseMemHandle(mem->buf_mem) != cudaSuccess) {
+			warnx("cudaIpcCloseMemHandle failed");
+		}
+	}
+#endif
 	kpm_dbg("exiting!");
 	exit(0);
 }

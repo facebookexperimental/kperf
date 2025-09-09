@@ -51,6 +51,11 @@ enum cuda_opt_type {
 
 struct cuda_ctx_worker_opts {
 	enum cuda_opt_type type;
+	int tcp_fd;
+	size_t dmabuf_size_mb;
+	int num_queues;
+	struct pci_dev *dev;
+	struct sockaddr_in6 *addr;
 	int kpm_fd;
 	pid_t pid;
 };
@@ -58,12 +63,6 @@ struct cuda_ctx_worker_opts {
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
 static int steering_rule_loc = -1;
-
-static int devmem_spawn_cuda_ctx_worker(struct session_state_devmem *devmem,
-					struct cuda_ctx_worker_opts *opts);
-
-static int devmem_free_cuda_ctx_worker(struct session_state_devmem *devmem,
-				       struct cuda_ctx_worker_opts *opts);
 
 static int ethtool(const char *ifname, void *data)
 {
@@ -670,10 +669,15 @@ static struct memory_buffer *cuda_alloc(size_t size)
 		return NULL;
 	memset(mem, 0, sizeof(*mem));
 	mem->size = size;
+	mem->provider = MEMORY_PROVIDER_CUDA;
 
 	ret = cudaMalloc((void *)&mem->buf_mem, size);
 	if (ret != CUDA_SUCCESS)
 		goto free_mem;
+
+	ret = cudaIpcGetMemHandle(&mem->cuda.handle, mem->buf_mem);
+	if (ret != CUDA_SUCCESS)
+		goto free_cuda;
 
 	ret = cuMemGetHandleForAddressRange((void *)&mem->fd, ((CUdeviceptr)mem->buf_mem),
 					    size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
@@ -824,30 +828,22 @@ void unreserve_queues(char *ifname, int rss_context)
 }
 
 /* Setup Devmem RX */
-int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t dmabuf_rx_size_mb, int num_queues,
-		 enum memory_provider_type provider,
-		 struct pci_dev *dev)
+static int __devmem_setup(struct session_state_devmem *devmem, int fd,
+			  size_t dmabuf_rx_size_mb, int num_queues,
+			  struct pci_dev *dev)
 {
-	struct cuda_ctx_worker_opts opts = {
-		.type = CUDA_OPT_TYPE_SETUP_RX,
-	};
 	struct netdev_queue_id *queues;
 	struct ynl_error yerr;
 	int max_kernel_queue;
 	int ifindex;
 	int ret;
 
-	ret = devmem_spawn_cuda_ctx_worker(devmem, &opts);
-	if (ret)
-		return ret;
-
 	ret = reserve_queues(fd, num_queues, devmem->ifname, &ifindex,
 			     &max_kernel_queue, &devmem->rss_context);
 	if (ret)
 		return ret;
 
-	rxmp = get_memory_provider(provider);
+	rxmp = get_memory_provider(devmem->rx_provider);
 	if (!rxmp) {
 		ret = -1;
 		goto undo_queues;
@@ -908,19 +904,13 @@ undo_queues:
 	return ret;
 }
 
-int devmem_teardown(struct session_state_devmem *devmem)
+static int __devmem_teardown(struct session_state_devmem *devmem)
 {
-	struct cuda_ctx_worker_opts opts = {
-		.type = CUDA_OPT_TYPE_TEARDOWN_RX,
-	};
-
 	unreserve_queues(devmem->ifname, devmem->rss_context);
 	if (devmem->ys)
 		ynl_sock_destroy(devmem->ys);
 	if (rxmp)
 		rxmp->free(devmem->mem);
-
-	devmem_free_cuda_ctx_worker(devmem, &opts);
 
 	return 0;
 }
@@ -1103,22 +1093,14 @@ int devmem_bind_socket(struct session_state_devmem *devmem, int fd)
 	return 0;
 }
 
-int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_type provider,
-		    int dmabuf_tx_size_mb, struct pci_dev *dev, struct sockaddr_in6 *addr)
+static int __devmem_setup_tx(struct session_state_devmem *devmem, int dmabuf_tx_size_mb,
+			     struct pci_dev *dev, struct sockaddr_in6 *addr)
 {
-	struct cuda_ctx_worker_opts opts = {
-		.type = CUDA_OPT_TYPE_SETUP_TX,
-	};
 	char ifname[IFNAMSIZ] = {};
 	struct ynl_error yerr;
 	int ifindex;
 	int ret;
 
-	ret = devmem_spawn_cuda_ctx_worker(devmem, &opts);
-	if (ret)
-		return ret;
-
-	devmem->tx_provider = provider;
 	devmem->dmabuf_tx_size_mb = dmabuf_tx_size_mb;
 	memcpy(&devmem->tx_dev, dev, sizeof(devmem->tx_dev));
 	memcpy(&devmem->addr, addr, sizeof(devmem->addr));
@@ -1166,12 +1148,8 @@ sock_destroy:
 	return ret;
 }
 
-void devmem_teardown_tx(struct session_state_devmem *devmem)
+static void __devmem_teardown_tx(struct session_state_devmem *devmem)
 {
-	struct cuda_ctx_worker_opts opts = {
-		.type = CUDA_OPT_TYPE_TEARDOWN_TX,
-	};
-
 	if (txmp && devmem->tx_mem) {
 		txmp->free(devmem->tx_mem);
 		devmem->tx_mem = NULL;
@@ -1181,8 +1159,6 @@ void devmem_teardown_tx(struct session_state_devmem *devmem)
 		ynl_sock_destroy(devmem->ys);
 		devmem->ys = NULL;
 	}
-
-	devmem_free_cuda_ctx_worker(devmem, &opts);
 }
 
 static void devmem_cuda_ctx_worker_main(struct cuda_ctx_worker_opts *opts)
@@ -1208,21 +1184,49 @@ static int devmem_worker_setup_cuda_ctx(struct session_state_devmem *devmem,
 					struct cuda_ctx_worker_opts *opts)
 {
 	struct kpm_cuda_init_done init_done;
+	int ret = 0;
 
 	kpm_dbg("cuda_ctx worker pid=%d is setting up cuda.", getpid());
 
-	memset(&init_done, 0, sizeof(init_done));
-	init_done.status = 0x5a5a;
-
-	kpm_dbg("cuda_ctx worker pid=%d is notifying session cuda_init is done. status=0x%x", getpid(), init_done.status);
-	if (kpm_send_cuda_init_done(opts->kpm_fd, &init_done) < 1) {
-		warnx("Notify cuda_init done fail");
+	if (opts->type == CUDA_OPT_TYPE_SETUP_RX) {
+		ret = __devmem_setup(devmem, opts->tcp_fd, opts->dmabuf_size_mb,
+				     opts->num_queues, opts->dev);
+	} else {
+		ret = __devmem_setup_tx(devmem, opts->dmabuf_size_mb,
+					opts->dev, opts->addr);
+	}
+	if (ret < 0) {
+		warnx("Failed to setup devmem");
 		return -1;
 	}
 
-	kpm_dbg("cuda_ctx worker pid=%d entering main loop.", getpid());
+	memset(&init_done, 0, sizeof(init_done));
+#ifdef USE_CUDA
+	if (opts->type == CUDA_OPT_TYPE_SETUP_RX) {
+		init_done.ipc_mem_handle = devmem->mem->cuda.handle;
+		init_done.dmabuf_id = devmem->mem->dmabuf_id;
+	} else {
+		init_done.ipc_mem_handle = devmem->tx_mem->cuda.handle;
+		init_done.dmabuf_id = devmem->tx_mem->dmabuf_id;
+	}
+#endif
+
+	if (kpm_send_cuda_init_done(opts->kpm_fd, &init_done) < 1) {
+		warnx("Notify cuda_init done fail");
+		if (opts->type == CUDA_OPT_TYPE_SETUP_RX)
+			__devmem_teardown(devmem);
+		else
+			__devmem_teardown_tx(devmem);
+		return -1;
+	}
 
 	devmem_cuda_ctx_worker_main(opts);
+
+	kpm_dbg("cuda_ctx worker pid=%d is tearing down cuda.", getpid());
+	if (opts->type == CUDA_OPT_TYPE_SETUP_RX)
+		__devmem_teardown(devmem);
+	else
+		__devmem_teardown_tx(devmem);
 
 	return 0;
 }
@@ -1231,6 +1235,7 @@ static int devmem_store_cuda_ctx(struct session_state_devmem *devmem,
 				 struct cuda_ctx_worker_opts *opts)
 {
 	struct kpm_cuda_init_done *init_done = NULL;
+	struct memory_buffer *mem = NULL;
 
 	kpm_dbg("server session pid=%d waiting for cuda_ctx from worker pid=%d.", getpid(), opts->pid);
 
@@ -1245,9 +1250,32 @@ static int devmem_store_cuda_ctx(struct session_state_devmem *devmem,
 		goto err_worker_kill;
 	}
 
-	kpm_dbg("server session pid=%d cuda_ctx saved. status=0x%x", getpid(), init_done->status);
-	devmem->ctx_kpm_fd = opts->kpm_fd;
-	devmem->ctx_pid = opts->pid;
+	mem = malloc(sizeof(struct memory_buffer));
+	if (!mem) {
+		warnx("malloc memory_buffer fail");
+		goto err_worker_kill;
+	}
+	memset(mem, 0, sizeof(struct memory_buffer));
+#ifdef USE_CUDA
+	mem->cuda.handle = init_done->ipc_mem_handle;
+#endif
+	mem->provider = MEMORY_PROVIDER_CUDA;
+	mem->dmabuf_id = init_done->dmabuf_id;
+	mem->cuda.ctx_pid = opts->pid;
+	mem->cuda.ctx_kpm_fd = opts->kpm_fd;
+	mem->size = opts->dmabuf_size_mb * 1024 * 1024;
+
+	if (opts->type == CUDA_OPT_TYPE_SETUP_RX) {
+		devmem->mem = mem;
+	} else {
+		devmem->tx_mem = mem;
+		devmem->dmabuf_tx_size_mb = opts->dmabuf_size_mb;
+		memcpy(&devmem->tx_dev, opts->dev, sizeof(devmem->tx_dev));
+		memcpy(&devmem->addr, opts->addr, sizeof(devmem->addr));
+	}
+
+	kpm_dbg("server session pid=%d received cuda_ctx from worker pid=%d and updated state",
+			getpid(), opts->pid);
 
 	free(init_done);
 	return 0;
@@ -1285,6 +1313,7 @@ static int devmem_spawn_cuda_ctx_worker(struct session_state_devmem *devmem,
 		close(p[0]);
 		opts->kpm_fd = p[1];
 		ret = devmem_worker_setup_cuda_ctx(devmem, opts);
+		close(p[1]);
 		kpm_dbg("cuda_ctx worker pid=%d exiting. ret=%d", getpid(), ret);
 		if (ret != 0)
 			exit(1);
@@ -1301,14 +1330,92 @@ static int devmem_spawn_cuda_ctx_worker(struct session_state_devmem *devmem,
 	return devmem_store_cuda_ctx(devmem, opts);
 }
 
+int devmem_setup(struct session_state_devmem *devmem, int fd,
+		 size_t dmabuf_rx_size_mb, int num_queues,
+		 enum memory_provider_type provider,
+		 struct pci_dev *dev)
+{
+	devmem->rx_provider = provider;
+
+	if (provider == MEMORY_PROVIDER_CUDA) {
+		struct cuda_ctx_worker_opts opts = {
+			.type = CUDA_OPT_TYPE_SETUP_RX,
+			.tcp_fd = fd,
+			.dmabuf_size_mb = dmabuf_rx_size_mb,
+			.num_queues = num_queues,
+			.dev = dev,
+		};
+		return devmem_spawn_cuda_ctx_worker(devmem, &opts);
+	} else {
+		return __devmem_setup(devmem, fd, dmabuf_rx_size_mb, num_queues, dev);
+	}
+}
+
+int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_type provider,
+		    int dmabuf_tx_size_mb, struct pci_dev *dev, struct sockaddr_in6 *addr)
+{
+	devmem->tx_provider = provider;
+
+	if (provider == MEMORY_PROVIDER_CUDA) {
+		struct cuda_ctx_worker_opts opts = {
+			.type = CUDA_OPT_TYPE_SETUP_TX,
+			.dmabuf_size_mb = dmabuf_tx_size_mb,
+			.dev = dev,
+			.addr = addr,
+		};
+		return devmem_spawn_cuda_ctx_worker(devmem, &opts);
+	} else {
+		return __devmem_setup_tx(devmem, dmabuf_tx_size_mb, dev, addr);
+	}
+}
+
 static int devmem_free_cuda_ctx_worker(struct session_state_devmem *devmem,
 				       struct cuda_ctx_worker_opts *opts)
 {
+	struct memory_buffer *mem = NULL;
+
 	kpm_dbg("server session pid=%d freeing cuda_ctx worker. type=%d", getpid(), opts->type);
-	if (devmem->ctx_pid > 0) {
-		kpm_send_empty(devmem->ctx_kpm_fd, KPM_MSG_WORKER_KILL);
-		waitpid(devmem->ctx_pid, NULL, 0);
-		close(devmem->ctx_kpm_fd);
+
+	if (opts->type == CUDA_OPT_TYPE_TEARDOWN_RX) {
+		mem = devmem->mem;
+		devmem->mem = NULL;
+	} else if (opts->type == CUDA_OPT_TYPE_TEARDOWN_TX) {
+		mem = devmem->tx_mem;
+		devmem->tx_mem = NULL;
 	}
+
+	if (mem && mem->cuda.ctx_pid > 0) {
+		kpm_send_empty(mem->cuda.ctx_kpm_fd, KPM_MSG_WORKER_KILL);
+		waitpid(mem->cuda.ctx_pid, NULL, 0);
+		close(mem->cuda.ctx_kpm_fd);
+	}
+
+	if (mem)
+		free(mem);
+
 	return 0;
+}
+
+int devmem_teardown(struct session_state_devmem *devmem)
+{
+	if (devmem->rx_provider == MEMORY_PROVIDER_CUDA) {
+		struct cuda_ctx_worker_opts opts = {
+			.type = CUDA_OPT_TYPE_TEARDOWN_RX,
+		};
+		return devmem_free_cuda_ctx_worker(devmem, &opts);
+	} else {
+		return __devmem_teardown(devmem);
+	}
+}
+
+void devmem_teardown_tx(struct session_state_devmem *devmem)
+{
+	if (devmem->tx_provider == MEMORY_PROVIDER_CUDA) {
+		struct cuda_ctx_worker_opts opts = {
+			.type = CUDA_OPT_TYPE_TEARDOWN_TX,
+		};
+		devmem_free_cuda_ctx_worker(devmem, &opts);
+	} else {
+		__devmem_teardown_tx(devmem);
+	}
 }
