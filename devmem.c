@@ -485,6 +485,7 @@ static struct memory_buffer *udmabuf_alloc(size_t size)
 	}
 
 	mem->size = size;
+	mem->provider = MEMORY_PROVIDER_HOST;
 	mem->buf_mem = mmap(NULL, mem->size, PROT_READ | PROT_WRITE,
 				  MAP_SHARED, mem->fd, 0);
 
@@ -716,15 +717,54 @@ void cuda_memcpy_to_device(struct memory_buffer *dst, size_t off,
 		warnx("cudaMemcpy() failed");
 }
 
+static int cuda_prep(struct memory_buffer *mem)
+{
+	if (mem && mem->provider == MEMORY_PROVIDER_CUDA) {
+		if (cudaIpcOpenMemHandle((void**)&mem->buf_mem, mem->cuda.handle,
+					 cudaIpcMemLazyEnablePeerAccess) == cudaSuccess) {
+			if (mem->cuda.host_buf_size > 0) {
+				mem->cuda.host_buf = malloc(mem->cuda.host_buf_size);
+				if (mem->cuda.host_buf == NULL) {
+					warnx("malloc cuda validation host_buf failed");
+					mem->cuda.host_buf_size = 0;
+					return -1;
+				}
+			}
+		} else {
+			warnx("cudaIpcOpenMemHandle failed");
+			mem->buf_mem = NULL;
+			mem->cuda.host_buf_size = 0;
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+static void cuda_exit(struct memory_buffer *mem)
+{
+	if (mem && mem->provider == MEMORY_PROVIDER_CUDA) {
+		if (mem->buf_mem && cudaIpcCloseMemHandle(mem->buf_mem) != cudaSuccess) {
+			warnx("cudaIpcCloseMemHandle failed");
+		}
+		if (mem->cuda.host_buf) {
+			free(mem->cuda.host_buf);
+			mem->cuda.host_buf_size = 0;
+		}
+	}
+}
+
 static struct memory_provider cuda_memory_provider = {
 	.dev_init = cuda_dev_init,
 	.alloc = cuda_alloc,
 	.free = cuda_free,
 	.memcpy_to_device = cuda_memcpy_to_device,
+	.prep = cuda_prep,
+	.exit = cuda_exit,
 };
 #endif
 
-static struct memory_provider *get_memory_provider(enum memory_provider_type provider)
+struct memory_provider *get_memory_provider(enum memory_provider_type provider)
 {
 	switch (provider) {
 	case MEMORY_PROVIDER_HOST:
@@ -934,42 +974,87 @@ int devmem_release_tokens(int fd, struct connection_devmem *conn)
 	return ret;
 }
 
-static int devmem_validate_token(struct memory_buffer *mem,
-				 struct cmsghdr *cm, int rep, __u64 *tot_recv)
+static int devmem_validate_host(struct memory_buffer *mem, __u64 offset,
+				__u32 pat_start, __u32 size)
 {
-	struct dmabuf_cmsg *dmabuf_cmsg = (struct dmabuf_cmsg *)CMSG_DATA(cm);
 	struct dma_buf_sync sync = {};
-	size_t start;
-	void *pat;
-	int ret;
-
-	start = *tot_recv % PATTERN_PERIOD;
-	if (start + dmabuf_cmsg->frag_size > ARRAY_SIZE(patbuf)) {
-		warnx("dmabuf fragment size too big");
-		return -1;
-	}
+	void *pat = NULL;
+	int ret = 0;
 
 	sync.flags = DMA_BUF_SYNC_START;
 	ioctl(mem->fd, DMA_BUF_IOCTL_SYNC, &sync);
 
-	pat = &patbuf[start];
-	/* TODO: memory_provider for CUDA case? */
-	ret = memcmp(pat, mem->buf_mem + dmabuf_cmsg->frag_offset, dmabuf_cmsg->frag_size);
+	pat = &patbuf[pat_start];
+	ret = memcmp(pat, mem->buf_mem + offset, size);
 
 	sync.flags = DMA_BUF_SYNC_END;
 	ioctl(mem->fd, DMA_BUF_IOCTL_SYNC, &sync);
 
 	if (ret) {
-		warnx("Data corruption %d %d %d %lld %lld %d",
-		      *(char *)mem->buf_mem, *(char *)pat, dmabuf_cmsg->frag_size,
-		      *tot_recv % PATTERN_PERIOD,
-		      *tot_recv, rep);
+		warnx("Data corruption %d %d %d %d",
+		      *(char *)mem->buf_mem, *(char *)pat, size, pat_start);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int devmem_validate_cuda(struct memory_buffer *mem, __u64 offset,
+				__u32 pat_start, __u32 size)
+{
+#ifdef USE_CUDA
+	void *pat = NULL, *hostbuf = NULL;
+	int ret = 0;
+
+	if (size > mem->cuda.host_buf_size) {
+		warnx("validate size=%d larger than host_buf_size=%ld", size, mem->cuda.host_buf_size);
+		return -1;
+	}
+
+	hostbuf = mem->cuda.host_buf;
+    ret = cudaMemcpy(hostbuf, (void *)(mem->buf_mem + offset), size, cudaMemcpyDeviceToHost);
+	if (ret != CUDA_SUCCESS) {
+		warnx("cudaMemcpyDeviceToHost failed rc=%d", ret);
+		return -1;
+	}
+
+	pat = &patbuf[pat_start];
+	ret = memcmp(pat, hostbuf, size);
+	if (ret) {
+		warnx("Data corruption %d %d %d %d",
+		      *(char *)hostbuf, *(char *)pat, size, pat_start);
+		return -1;
+	}
+#endif
+
+	return 0;
+}
+
+static int devmem_validate_token(struct memory_buffer *mem,
+				 struct cmsghdr *cm, int rep, __u64 *tot_recv)
+{
+	struct dmabuf_cmsg *dmabuf_cmsg = (struct dmabuf_cmsg *)CMSG_DATA(cm);
+	size_t start = 0;
+	int ret = 0;
+
+	start = *tot_recv % PATTERN_PERIOD;
+	if (start + dmabuf_cmsg->frag_size > ARRAY_SIZE(patbuf)) {
+		warnx("dmabuf fragment size too big rep=%d", rep);
+		return -1;
+	}
+
+	if (mem->provider == MEMORY_PROVIDER_CUDA) {
+		ret = devmem_validate_cuda(mem, dmabuf_cmsg->frag_offset, start, dmabuf_cmsg->frag_size);
+	} else {
+		ret = devmem_validate_host(mem, dmabuf_cmsg->frag_offset, start, dmabuf_cmsg->frag_size);
+	}
+	if (ret) {
+		warnx("token validation failed rep=%d rc=%d", rep, ret);
 		return -1;
 	}
 
 	*tot_recv += dmabuf_cmsg->frag_size;
-
-	return 0;
+	return ret;
 }
 
 static int devmem_handle_token(int fd, struct connection_devmem *conn,
@@ -1267,6 +1352,7 @@ static int devmem_store_cuda_ctx(struct session_state_devmem *devmem,
 
 	if (opts->type == CUDA_OPT_TYPE_SETUP_RX) {
 		devmem->mem = mem;
+		mem->cuda.host_buf_size = devmem->validate_buf_size;
 	} else {
 		devmem->tx_mem = mem;
 		devmem->dmabuf_tx_size_mb = opts->dmabuf_size_mb;
@@ -1290,6 +1376,10 @@ err_worker_kill:
 	return -1;
 }
 
+/* Sharing CUDA context between processes is not straightforward.
+ * Setting up the context in the parent and using it in the (forked) child is not supported.
+ * Initialize and manage CUDA context in a separate worker then share via cudaIpcMemHandle_t
+ */
 static int devmem_spawn_cuda_ctx_worker(struct session_state_devmem *devmem,
 					struct cuda_ctx_worker_opts *opts)
 {

@@ -391,11 +391,13 @@ worker_recv_finished(struct worker_state *self, struct worker_connection *conn)
 
 void NORETURN pworker_main(int fd, struct worker_opts opts)
 {
+	struct memory_provider *mp = NULL;
+	struct memory_buffer *mem = NULL;
 	struct worker_state self = {
 		.main_sock = fd,
 		.opts = opts,
 	};
-	struct memory_buffer *mem = self.opts.devmem.mem;
+	int ret = 0;
 
 	if (opts.use_iou)
 		worker_iou_init(&self);
@@ -403,16 +405,18 @@ void NORETURN pworker_main(int fd, struct worker_opts opts)
 		worker_epoll_init(&self);
 
 	list_head_init(&self.connections);
-#ifdef USE_CUDA
-	if (mem && mem->provider == MEMORY_PROVIDER_CUDA) {
-		if (cudaIpcOpenMemHandle((void**)&mem->buf_mem, mem->cuda.handle,
-					 cudaIpcMemLazyEnablePeerAccess) != cudaSuccess) {
-			warnx("cudaIpcOpenMemHandle failed");
-			mem->buf_mem = NULL;
+
+	mem = self.opts.devmem.mem;
+	if (mem)
+		mp = get_memory_provider(mem->provider);
+	if (mp && mp->prep) {
+		ret = mp->prep(mem);
+		if (ret) {
+			warnx("pworker failed to prepare memory rc=%d", ret);
 			self.quit = 1;
 		}
 	}
-#endif
+
 	self.ops->prep(&self);
 
 	while (!self.quit) {
@@ -432,13 +436,9 @@ void NORETURN pworker_main(int fd, struct worker_opts opts)
 	}
 
 	self.ops->exit(&self);
-#ifdef USE_CUDA
-	if (mem && mem->provider == MEMORY_PROVIDER_CUDA) {
-		if (mem->buf_mem && cudaIpcCloseMemHandle(mem->buf_mem) != cudaSuccess) {
-			warnx("cudaIpcCloseMemHandle failed");
-		}
-	}
-#endif
+	if (mp && mp->exit)
+		mp->exit(mem);
+
 	kpm_dbg("exiting!");
 	exit(0);
 }

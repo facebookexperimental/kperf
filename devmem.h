@@ -11,7 +11,7 @@ int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
 void unreserve_queues(char *ifname, int rss_context);
 
 int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t dmabuf_size, int num_queues,
+		 size_t dmabuf_rx_size_mb, int num_queues,
 		 enum memory_provider_type provider, struct pci_dev *dev);
 int devmem_teardown(struct session_state_devmem *devmem);
 void devmem_teardown_tx(struct session_state_devmem *devmem);

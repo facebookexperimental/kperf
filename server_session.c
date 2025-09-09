@@ -522,6 +522,8 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	req = (void *)hdr;
 
 	if (self->tcp_sock && req->rx_mode == KPM_RX_MODE_DEVMEM) {
+		if (req->validate)
+			self->devmem.validate_buf_size = req->read_size;
 		ret = devmem_setup(&self->devmem, self->tcp_sock, req->dmabuf_rx_size_mb,
 				   req->num_rx_queues, req->rx_provider,
 				   &req->dev);

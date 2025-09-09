@@ -50,6 +50,8 @@ struct dmabuf_token {
 };
 
 struct memory_buffer_cuda {
+	char *host_buf;
+	size_t host_buf_size;
 	pid_t ctx_pid;
 	int ctx_kpm_fd;
 #ifdef USE_CUDA
@@ -77,6 +79,8 @@ struct memory_provider {
 				 void *src, int n);
 	void (*memcpy_from_device)(void *dst, struct memory_buffer *src,
 				   size_t off, int n);
+	int (*prep)(struct memory_buffer *mem);
+	void (*exit)(struct memory_buffer *mem);
 };
 
 struct connection_devmem {
@@ -94,6 +98,7 @@ struct session_state_devmem {
 	struct memory_buffer *mem;
 	int rss_context;
 	enum memory_provider_type rx_provider;
+	unsigned int validate_buf_size;
 
 	/* TX */
 	struct memory_buffer *tx_mem;
@@ -135,5 +140,6 @@ struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
 void NORETURN pworker_main(int fd, struct worker_opts opts);
+struct memory_provider *get_memory_provider(enum memory_provider_type provider);
 
 #endif /* SERVER_H */
