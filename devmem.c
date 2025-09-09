@@ -637,8 +637,6 @@ static struct memory_buffer *cuda_alloc(size_t size)
 {
 	struct memory_buffer *mem;
 	size_t page_size;
-	CUdevice dev;
-	int devnum;
 	int ret;
 
 	page_size = sysconf(_SC_PAGESIZE);
@@ -650,27 +648,16 @@ static struct memory_buffer *cuda_alloc(size_t size)
 	mem = calloc(1, sizeof(*mem));
 	if (!mem)
 		return NULL;
+	memset(mem, 0, sizeof(*mem));
+	mem->size = size;
 
-	ret = cudaGetDevice(&devnum);
+	ret = cudaMalloc((void *)&mem->buf_mem, size);
 	if (ret != cudaSuccess)
 		goto free_mem;
 
-	ret = cuDeviceGet(&dev, devnum);
-	if (ret != CUDA_SUCCESS)
-		goto free_mem;
-
-	ret = cuCtxCreate(&mem->cuda.ctx, 0, dev);
-	if (ret != CUDA_SUCCESS)
-		goto free_mem;
-
-	mem->size = size;
-
-	ret = cuMemAlloc((CUdeviceptr *)&mem->buf_mem, size);
-	if (ret != CUDA_SUCCESS)
-		goto destroy_ctx;
-
-	ret = cuMemGetHandleForAddressRange((void *)&mem->fd, ((CUdeviceptr)mem->buf_mem),
-					    size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+	ret = cuMemGetHandleForAddressRange((void *)&mem->fd,
+					    ((CUdeviceptr)mem->buf_mem), size,
+					    CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
 					    CUDA_FLAGS);
 	if (ret != CUDA_SUCCESS)
 		goto free_cuda;
@@ -678,11 +665,8 @@ static struct memory_buffer *cuda_alloc(size_t size)
 	return mem;
 
 free_cuda:
-	if (cuMemFree((CUdeviceptr)mem->buf_mem) != CUDA_SUCCESS)
-		warnx("cuMemFree() failed");
-destroy_ctx:
-	if (cuCtxDestroy(mem->cuda.ctx) != CUDA_SUCCESS)
-		warnx("cuCtxDestroy() failed");
+	if (cudaFree(mem->buf_mem) != cudaSuccess)
+		warnx("cudaFree() failed");
 free_mem:
 	free(mem);
 
@@ -693,12 +677,9 @@ static void cuda_free(struct memory_buffer *mem)
 {
 	if (mem->fd)
 		close(mem->fd);
-	if (mem->buf_mem) {
-		munmap(mem->buf_mem, mem->size);
-		cuMemFree((CUdeviceptr)mem->buf_mem);
-	}
+	if (mem->buf_mem)
+		cudaFree(mem->buf_mem);
 
-	cuCtxDestroy(mem->cuda.ctx);
 	free(mem);
 }
 
@@ -707,9 +688,10 @@ void cuda_memcpy_to_device(struct memory_buffer *dst, size_t off,
 {
 	int ret;
 
-	ret = cuMemcpyHtoD((CUdeviceptr)(dst->buf_mem + off), src, n);
-	if (ret != CUDA_SUCCESS)
-		warnx("cuMemcpyHtoD() failed");
+	ret = cudaMemcpy((void *)(dst->buf_mem + off), src, n,
+			 cudaMemcpyHostToDevice);
+	if (ret != cudaSuccess)
+		warnx("cudaMemcpy() failed");
 }
 
 static struct memory_provider cuda_memory_provider = {
