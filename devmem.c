@@ -608,7 +608,6 @@ static int cuda_find_device(__u16 domain, __u8 bus, __u8 device)
 
 static int cuda_dev_init(struct pci_dev *dev)
 {
-	struct cudaDeviceProp deviceProp;
 	CUdevice cuda_dev;
 	int devnum;
 	int ret;
@@ -647,8 +646,8 @@ static int cuda_dev_init(struct pci_dev *dev)
 	}
 
 	if (verbose >= 4)
-		fprintf(stderr, "cuda: tid %d selecting device %d (%s)\n",
-			getpid(), devnum, deviceProp.name);
+		fprintf(stderr, "cuda: tid %d selecting device %d\n",
+			getpid(), devnum);
 
 	return 0;
 }
@@ -921,9 +920,9 @@ static int __devmem_setup(struct session_state_devmem *devmem, int fd,
 		queues[i].id = max_kernel_queue + i;
 	}
 
-        devmem->mem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem->fd, queues,
-                                          num_queues, devmem->ys);
-        if (devmem->mem->dmabuf_id < 0) {
+	devmem->mem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem->fd, queues,
+					       num_queues, devmem->ys);
+	if (devmem->mem->dmabuf_id < 0) {
 		warnx("Failed to bind RX queue");
 		ret = -1;
 		goto free_queues;
@@ -1012,7 +1011,7 @@ static int devmem_validate_cuda(struct memory_buffer *mem, __u64 offset,
 	}
 
 	hostbuf = mem->cuda.host_buf;
-    ret = cudaMemcpy(hostbuf, (void *)(mem->buf_mem + offset), size, cudaMemcpyDeviceToHost);
+	ret = cudaMemcpy(hostbuf, (void *)(mem->buf_mem + offset), size, cudaMemcpyDeviceToHost);
 	if (ret != CUDA_SUCCESS) {
 		warnx("cudaMemcpyDeviceToHost failed rc=%d", ret);
 		return -1;
@@ -1224,7 +1223,6 @@ static int __devmem_setup_tx(struct session_state_devmem *devmem, int dmabuf_tx_
 		goto sock_destroy;
 	}
 
-
 	return 0;
 
 sock_destroy:
@@ -1361,7 +1359,7 @@ static int devmem_store_cuda_ctx(struct session_state_devmem *devmem,
 	}
 
 	kpm_dbg("server session pid=%d received cuda_ctx from worker pid=%d and updated state",
-			getpid(), opts->pid);
+		getpid(), opts->pid);
 
 	free(init_done);
 	return 0;
