@@ -126,11 +126,12 @@ struct worker_opts {
 	bool use_iou;
 	struct worker_state_devmem devmem;
 	struct worker_state_iou iou;
+	int fd;
 };
 
 struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
-void NORETURN pworker_main(int fd, struct worker_opts opts);
+void* pworker_main(void* args);
 
 #endif /* SERVER_H */

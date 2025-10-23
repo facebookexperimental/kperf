@@ -570,9 +570,12 @@ err_quit:
 static void
 server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 {
+	struct worker_opts *opts = NULL;
+	struct pworker *pwrk = NULL;
 	struct epoll_event ev = {};
-	struct pworker *pwrk;
-	int p[2];
+	int p[2], dmabuf_id;
+	pthread_attr_t attr;
+	pthread_t thread;
 
 	pwrk = malloc(sizeof(*pwrk));
 	if (!pwrk) {
@@ -581,46 +584,48 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 	}
 	memset(pwrk, 0, sizeof(*pwrk));
 
-	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, p) < 0)
-		goto err_free;
-
-	pwrk->pid = fork();
-	if (pwrk->pid < 0) {
-		warn("Failed to fork");
+	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, p) < 0) {
+		warnx("Failed to create socket pair");
 		goto err_free;
 	}
-	if (!pwrk->pid) {
-		int dmabuf_id = self->devmem.tx_mem ? self->devmem.tx_mem->dmabuf_id : -1;
 
-		close(p[0]);
-		struct worker_opts opts = {
-			.rx_mode = self->rx_mode,
-			.tx_mode = self->tx_mode,
-			.validate = self->validate,
-			.use_iou = self->iou,
-			.devmem = {
-				.mem = self->devmem.mem,
-				.dmabuf_id = dmabuf_id,
-			},
-			.iou = {
-				.rx_size_mb = self->iou_state.rx_size_mb,
-				.ifindex = self->iou_state.ifindex,
-				.queue_id = self->iou_state.queue_id,
-			},
-		};
-		pworker_main(p[1], opts);
-		exit(1);
+	if (pthread_attr_init(&attr)) {
+		warnx("Failed to init pthread attr");
+		goto err_free;
+	}
+	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED)) {
+		warnx("Failed to set pthread attr");
+		goto err_free_attr;
+	}
+	dmabuf_id = self->devmem.tx_mem ? self->devmem.tx_mem->dmabuf_id : -1;
+	opts = malloc(sizeof(*opts));
+	if (!opts)
+		goto err_free_attr;
+	memset(opts, 0, sizeof(*opts));
+	opts->fd = p[1];
+	opts->rx_mode = self->rx_mode;
+	opts->tx_mode = self->tx_mode;
+	opts->validate = self->validate;
+	opts->use_iou = self->iou;
+	opts->devmem.mem = self->devmem.mem;
+	opts->devmem.dmabuf_id = dmabuf_id;
+	opts->iou.rx_size_mb = self->iou_state.rx_size_mb;
+	opts->iou.ifindex = self->iou_state.ifindex;
+	opts->iou.queue_id = self->iou_state.queue_id;
+	if (pthread_create(&thread, &attr, pworker_main, opts) != 0) {
+		warnx("Failed to create worker thread");
+		free(opts);
+		goto err_free_attr;
 	}
 
 	self->iou_state.queue_id++;
 	pwrk->id = ++self->worker_ids;
 	pwrk->fd = p[0];
-	close(p[1]);
 
 	ev.events = EPOLLIN | EPOLLET;
 	ev.data.fd = pwrk->fd;
 	if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, pwrk->fd, &ev) < 0) {
-		warn("Failed to add worker sock to epoll");
+		warnx("Failed to add worker sock to epoll");
 		goto err_worker_kill;
 	}
 
@@ -630,15 +635,17 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 		goto err_worker_kill;
 
 	list_add(&self->pworkers, &pwrk->pworkers);
+	pthread_attr_destroy(&attr);
 
 	return;
 
 err_worker_kill:
 	kpm_send_empty(pwrk->fd, KPM_MSG_WORKER_KILL);
+err_free_attr:
+	pthread_attr_destroy(&attr);
 err_free:
 	free(pwrk);
 	self->quit = 1;
-	return;
 }
 
 static void
@@ -779,8 +786,6 @@ bad_req:
 		for (j = 0; j < msg->n_conns; j++) {
 			conn = session_find_connection_by_id(self, msg->specs[j].connection_id);
 			fdpass_send(pwrk->fd, conn->fd);
-			/* close to ensure the only open descriptors are owned by the worker. */
-			close(conn->fd);
 		}
 	}
 
