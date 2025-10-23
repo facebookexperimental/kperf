@@ -388,19 +388,20 @@ worker_recv_finished(struct worker_state *self, struct worker_connection *conn)
 }
 
 /* == Main loop == */
-
-void NORETURN pworker_main(int fd, struct worker_opts opts)
+void* pworker_main(void* args)
 {
+	struct worker_opts* opts = args;
 	struct worker_state self = {
-		.main_sock = fd,
-		.opts = opts,
+		.main_sock = opts->fd,
+		.opts = *opts,
+
 	};
 
-	if (opts.use_iou)
+	free(opts);
+	if (self.opts.use_iou)
 		worker_iou_init(&self);
 	else
 		worker_epoll_init(&self);
-
 	list_head_init(&self.connections);
 
 	self.ops->prep(&self);
@@ -422,6 +423,7 @@ void NORETURN pworker_main(int fd, struct worker_opts opts)
 	}
 
 	self.ops->exit(&self);
+	close(self.main_sock);
 	kpm_dbg("exiting!");
-	exit(0);
+	return NULL;
 }
