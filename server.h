@@ -65,6 +65,7 @@ struct memory_buffer {
 #ifdef USE_CUDA
 	struct memory_buffer_cuda cuda;
 #endif
+	enum memory_provider_type provider;
 };
 
 struct memory_provider {
