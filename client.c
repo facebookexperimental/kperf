@@ -778,10 +778,6 @@ int main(int argc, char *argv[])
 	else if (opt.devmem_rx)
 		rx_mode = KPM_RX_MODE_DEVMEM;
 
-	/* TODO: support --validate yes for cuda rx */
-	if (opt.validate && opt.devmem_rx_memory == MEMORY_PROVIDER_CUDA)
-		errx(1, "--devmem-rx-memory cuda does not support --validate yes");
-
 	if (opt.msg_zerocopy && opt.devmem_tx)
 		errx(1, "--msg-zerocopy and --devmem-tx are mutually exclusive");
 

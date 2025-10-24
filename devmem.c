@@ -466,6 +466,7 @@ static struct memory_buffer *udmabuf_alloc(size_t size)
 	}
 
 	mem->size = size;
+	mem->provider = MEMORY_PROVIDER_HOST;
 	mem->buf_mem = mmap(NULL, mem->size, PROT_READ | PROT_WRITE,
 				  MAP_SHARED, mem->fd, 0);
 
@@ -650,6 +651,7 @@ static struct memory_buffer *cuda_alloc(size_t size)
 		return NULL;
 	memset(mem, 0, sizeof(*mem));
 	mem->size = size;
+	mem->provider = MEMORY_PROVIDER_CUDA;
 
 	ret = cudaMalloc((void *)&mem->buf_mem, size);
 	if (ret != cudaSuccess)
@@ -912,42 +914,87 @@ int devmem_release_tokens(int fd, struct connection_devmem *conn)
 	return ret;
 }
 
-static int devmem_validate_token(struct memory_buffer *mem,
-				 struct cmsghdr *cm, int rep, __u64 *tot_recv)
+static int devmem_validate_host(struct memory_buffer *mem, __u64 offset,
+				__u32 pat_start, __u32 size)
 {
-	struct dmabuf_cmsg *dmabuf_cmsg = (struct dmabuf_cmsg *)CMSG_DATA(cm);
 	struct dma_buf_sync sync = {};
-	size_t start;
-	void *pat;
-	int ret;
-
-	start = *tot_recv % PATTERN_PERIOD;
-	if (start + dmabuf_cmsg->frag_size > ARRAY_SIZE(patbuf)) {
-		warnx("dmabuf fragment size too big");
-		return -1;
-	}
+	void *pat = NULL;
+	int ret = 0;
 
 	sync.flags = DMA_BUF_SYNC_START;
 	ioctl(mem->fd, DMA_BUF_IOCTL_SYNC, &sync);
 
-	pat = &patbuf[start];
-	/* TODO: memory_provider for CUDA case? */
-	ret = memcmp(pat, mem->buf_mem + dmabuf_cmsg->frag_offset, dmabuf_cmsg->frag_size);
+	pat = &patbuf[pat_start];
+	ret = memcmp(pat, mem->buf_mem + offset, size);
 
 	sync.flags = DMA_BUF_SYNC_END;
 	ioctl(mem->fd, DMA_BUF_IOCTL_SYNC, &sync);
 
 	if (ret) {
-		warnx("Data corruption %d %d %d %lld %lld %d",
-		      *(char *)mem->buf_mem, *(char *)pat, dmabuf_cmsg->frag_size,
-		      *tot_recv % PATTERN_PERIOD,
-		      *tot_recv, rep);
+		warnx("Data corruption %d %d %d %d",
+		      *(char *)mem->buf_mem, *(char *)pat, size, pat_start);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int devmem_validate_cuda(unsigned char *rxbuf, struct memory_buffer *mem,
+				__u64 offset, __u32 pat_start, __u32 size)
+{
+#ifdef USE_CUDA
+	void *pat = NULL;
+	int ret = 0;
+
+	ret = cudaMemcpy(rxbuf, (void *)(mem->buf_mem + offset), size,
+			 cudaMemcpyDeviceToHost);
+	if (ret != cudaSuccess) {
+		warnx("cudaMemcpyDeviceToHost failed rc=%d", ret);
+		return -1;
+	}
+
+	pat = &patbuf[pat_start];
+	ret = memcmp(pat, rxbuf, size);
+	if (ret) {
+		warnx("Data corruption %d %d %d %d",
+		      *(char *)rxbuf, *(char *)pat, size, pat_start);
+		return -1;
+	}
+#endif
+
+	return 0;
+}
+
+static int devmem_validate_recv(unsigned char *rxbuf, struct memory_buffer *mem,
+				struct cmsghdr *cm, int rep, __u64 *tot_recv)
+{
+	struct dmabuf_cmsg *dmabuf_cmsg = (struct dmabuf_cmsg *)CMSG_DATA(cm);
+	size_t start = 0;
+	int ret = 0;
+
+	start = *tot_recv % PATTERN_PERIOD;
+	if (start + dmabuf_cmsg->frag_size > ARRAY_SIZE(patbuf)) {
+		warnx("dmabuf fragment size too big rep=%d", rep);
+		return -1;
+	}
+
+	switch (mem->provider) {
+	case MEMORY_PROVIDER_HOST:
+		ret = devmem_validate_host(mem, dmabuf_cmsg->frag_offset, start,
+					   dmabuf_cmsg->frag_size);
+		break;
+	case MEMORY_PROVIDER_CUDA:
+		ret = devmem_validate_cuda(rxbuf, mem, dmabuf_cmsg->frag_offset,
+					   start, dmabuf_cmsg->frag_size);
+		break;
+	}
+	if (ret) {
+		warnx("devmem recv validation failed rep=%d rc=%d", rep, ret);
 		return -1;
 	}
 
 	*tot_recv += dmabuf_cmsg->frag_size;
-
-	return 0;
+	return ret;
 }
 
 static int devmem_handle_token(int fd, struct connection_devmem *conn,
@@ -1010,7 +1057,8 @@ ssize_t devmem_recv(int fd, struct connection_devmem *conn,
 			return ret;
 
 		if (validate) {
-			ret = devmem_validate_token(mem, cm, rep, &tot_recv);
+			ret = devmem_validate_recv(rxbuf, mem, cm, rep,
+						   &tot_recv);
 			if (ret < 0)
 				return ret;
 		}
