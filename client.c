@@ -790,11 +790,6 @@ int main(int argc, char *argv[])
 	else if (opt.devmem_tx)
 		tx_mode = KPM_TX_MODE_DEVMEM;
 
-	src_wrk_id = calloc(opt.n_conns, sizeof(*src_wrk_id));
-	dst_wrk_id = calloc(opt.n_conns, sizeof(*dst_wrk_id));
-	src_wrk_cpu = calloc(opt.n_conns, sizeof(*src_wrk_cpu));
-	dst_wrk_cpu = calloc(opt.n_conns, sizeof(*dst_wrk_cpu));
-
 	addr = net_client_lookup(opt.src, opt.src_svc, AF_UNSPEC, SOCK_STREAM);
 	if (!addr)
 		errx(1, "Failed to look up service to connect to");
@@ -820,6 +815,11 @@ int main(int argc, char *argv[])
 
 	if (kpm_xchg_hello(dst, &dst_ncpus))
 		errx(2, "Bad hello");
+
+	src_wrk_id = calloc(opt.n_conns, sizeof(*src_wrk_id));
+	dst_wrk_id = calloc(opt.n_conns, sizeof(*dst_wrk_id));
+	src_wrk_cpu = calloc(opt.n_conns, sizeof(*src_wrk_cpu));
+	dst_wrk_cpu = calloc(opt.n_conns, sizeof(*dst_wrk_cpu));
 
 	/* Main */
 	len = sizeof(conn_addr);
@@ -1019,6 +1019,11 @@ out_id:
 out:
 	close(src);
 	close(dst);
+
+	free(src_wrk_id);
+	free(dst_wrk_id);
+	free(src_wrk_cpu);
+	free(dst_wrk_cpu);
 
 	return 0;
 }
