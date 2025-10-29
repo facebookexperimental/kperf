@@ -423,7 +423,7 @@ static int spawn_worker(int fd, int cpu, __u32 *wid)
 	struct kpm_empty *ack;
 	int seq;
 
-	seq = kpm_send_empty(fd, KPM_MSG_TYPE_SPAWN_PWORKER);
+	seq = kpm_send_empty(fd, KPM_MSG_TYPE_SPAWN_WORKER);
 	if (seq < 0) {
 		warn("Failed to spawn");
 		return 1;
@@ -435,7 +435,7 @@ static int spawn_worker(int fd, int cpu, __u32 *wid)
 		return 1;
 	}
 
-	if (!kpm_good_reply(id, KPM_MSG_TYPE_SPAWN_PWORKER, seq)) {
+	if (!kpm_good_reply(id, KPM_MSG_TYPE_SPAWN_WORKER, seq)) {
 		warnx("Invalid spawn ack %d %d", id->hdr.type, id->hdr.len);
 		free(id);
 		return 1;

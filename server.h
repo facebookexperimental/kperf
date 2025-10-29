@@ -132,6 +132,6 @@ struct worker_opts {
 struct server_session *
 server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
 
-void* pworker_main(void* args);
+void* worker_main(void* args);
 
 #endif /* SERVER_H */

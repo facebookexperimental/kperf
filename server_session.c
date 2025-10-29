@@ -43,7 +43,7 @@ struct session_state {
 	unsigned int worker_ids;
 	unsigned int test_ids;
 	struct list_head connections;
-	struct list_head pworkers;
+	struct list_head workers;
 	struct list_head tests;
 	struct session_state_devmem devmem;
 	struct session_state_iou iou_state;
@@ -60,12 +60,12 @@ struct connection {
 	struct list_node connections;
 };
 
-struct pworker {
+struct worker {
 	unsigned int id;
 	int fd;
 	pid_t pid;
 	int busy;
-	struct list_node pworkers;
+	struct list_node workers;
 };
 
 struct test {
@@ -92,14 +92,14 @@ session_find_connection_by_id(struct session_state *self, unsigned int id)
 	return NULL;
 }
 
-static struct pworker *
+static struct worker *
 session_find_worker_by_id(struct session_state *self, unsigned int id)
 {
-	struct pworker *pwrk;
+	struct worker *wrk;
 
-	list_for_each(&self->pworkers, pwrk, pworkers) {
-		if (pwrk->id == id)
-			return pwrk;
+	list_for_each(&self->workers, wrk, workers) {
+		if (wrk->id == id)
+			return wrk;
 	}
 	return NULL;
 }
@@ -568,21 +568,21 @@ err_quit:
 }
 
 static void
-server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
+server_msg_spawn_worker(struct session_state *self, struct kpm_header *hdr)
 {
 	struct worker_opts *opts = NULL;
-	struct pworker *pwrk = NULL;
+	struct worker *wrk = NULL;
 	struct epoll_event ev = {};
 	int p[2], dmabuf_id;
 	pthread_attr_t attr;
 	pthread_t thread;
 
-	pwrk = malloc(sizeof(*pwrk));
-	if (!pwrk) {
+	wrk = malloc(sizeof(*wrk));
+	if (!wrk) {
 		self->quit = 1;
 		return;
 	}
-	memset(pwrk, 0, sizeof(*pwrk));
+	memset(wrk, 0, sizeof(*wrk));
 
 	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, p) < 0) {
 		warnx("Failed to create socket pair");
@@ -612,39 +612,39 @@ server_msg_spawn_pworker(struct session_state *self, struct kpm_header *hdr)
 	opts->iou.rx_size_mb = self->iou_state.rx_size_mb;
 	opts->iou.ifindex = self->iou_state.ifindex;
 	opts->iou.queue_id = self->iou_state.queue_id;
-	if (pthread_create(&thread, &attr, pworker_main, opts) != 0) {
+	if (pthread_create(&thread, &attr, worker_main, opts) != 0) {
 		warnx("Failed to create worker thread");
 		free(opts);
 		goto err_free_attr;
 	}
 
 	self->iou_state.queue_id++;
-	pwrk->id = ++self->worker_ids;
-	pwrk->fd = p[0];
+	wrk->id = ++self->worker_ids;
+	wrk->fd = p[0];
 
 	ev.events = EPOLLIN | EPOLLET;
-	ev.data.fd = pwrk->fd;
-	if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, pwrk->fd, &ev) < 0) {
+	ev.data.fd = wrk->fd;
+	if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, wrk->fd, &ev) < 0) {
 		warnx("Failed to add worker sock to epoll");
 		goto err_worker_kill;
 	}
 
-	kpm_send_u32(pwrk->fd, KPM_MSG_WORKER_ID, pwrk->id);
+	kpm_send_u32(wrk->fd, KPM_MSG_WORKER_ID, wrk->id);
 
-	if (kpm_reply_u32(self->main_sock, hdr, pwrk->id) < 1)
+	if (kpm_reply_u32(self->main_sock, hdr, wrk->id) < 1)
 		goto err_worker_kill;
 
-	list_add(&self->pworkers, &pwrk->pworkers);
+	list_add(&self->workers, &wrk->workers);
 	pthread_attr_destroy(&attr);
 
 	return;
 
 err_worker_kill:
-	kpm_send_empty(pwrk->fd, KPM_MSG_WORKER_KILL);
+	kpm_send_empty(wrk->fd, KPM_MSG_WORKER_KILL);
 err_free_attr:
 	pthread_attr_destroy(&attr);
 err_free:
-	free(pwrk);
+	free(wrk);
 	self->quit = 1;
 }
 
@@ -652,7 +652,7 @@ static void
 server_msg_pin_worker(struct session_state *self, struct kpm_header *hdr)
 {
 	struct kpm_pin_worker *req;
-	struct pworker *pwrk;
+	struct worker *wrk;
 	cpu_set_t set;
 
 	if (hdr->len < sizeof(struct kpm_pin_worker)) {
@@ -662,8 +662,8 @@ server_msg_pin_worker(struct session_state *self, struct kpm_header *hdr)
 	}
 	req = (void *)hdr;
 
-	pwrk = session_find_worker_by_id(self, req->worker_id);
-	if (!pwrk) {
+	wrk = session_find_worker_by_id(self, req->worker_id);
+	if (!wrk) {
 		kpm_reply_error(self->main_sock, hdr, ENOENT);
 		return;
 	}
@@ -685,7 +685,7 @@ server_msg_pin_worker(struct session_state *self, struct kpm_header *hdr)
 		CPU_SET(req->cpu, &set);
 	}
 
-	if (sched_setaffinity(pwrk->pid, sizeof(set), &set) < 0) {
+	if (sched_setaffinity(wrk->pid, sizeof(set), &set) < 0) {
 		warn("Failed to pin worker to CPU");
 		kpm_reply_error(self->main_sock, hdr, errno);
 		return;
@@ -744,17 +744,17 @@ bad_req:
 	for (i = 0; i < n_conns; i++) {
 		struct kpm_test_spec *t = &req->specs[i];
 		struct connection *conn;
-		struct pworker *pwrk;
+		struct worker *wrk;
 		struct kpm_test *msg;
 
-		pwrk = session_find_worker_by_id(self, t->worker_id);
+		wrk = session_find_worker_by_id(self, t->worker_id);
 		conn = session_find_connection_by_id(self, t->connection_id);
-		if (!pwrk || !conn) {
+		if (!wrk || !conn) {
 			warnx("worker or connection not found");
 			kpm_reply_error(self->main_sock, hdr, ENOENT);
 			goto err_free;
 		}
-		if (pwrk->busy) {
+		if (wrk->busy) {
 			warnx("worker is busy");
 			kpm_reply_error(self->main_sock, hdr, EBUSY);
 			goto err_free;
@@ -766,7 +766,7 @@ bad_req:
 
 	for (i = 0; i < test->worker_range; i++) {
 		struct connection *conn;
-		struct pworker *pwrk;
+		struct worker *wrk;
 		struct kpm_test *msg;
 
 		msg = fwd[i];
@@ -777,15 +777,15 @@ bad_req:
 		msg->test_id = test->id;
 
 		test->workers_total++;
-		pwrk = session_find_worker_by_id(self, msg->specs[0].worker_id);
-		pwrk->busy = 1;
+		wrk = session_find_worker_by_id(self, msg->specs[0].worker_id);
+		wrk->busy = 1;
 
-		kpm_send(pwrk->fd, &msg->hdr,
+		kpm_send(wrk->fd, &msg->hdr,
 			 sizeof(*msg) + sizeof(msg->specs[0]) * msg->n_conns,
 			 KPM_MSG_WORKER_TEST);
 		for (j = 0; j < msg->n_conns; j++) {
 			conn = session_find_connection_by_id(self, msg->specs[j].connection_id);
-			fdpass_send(pwrk->fd, conn->fd);
+			fdpass_send(wrk->fd, conn->fd);
 		}
 	}
 
@@ -831,7 +831,7 @@ server_msg_end_test(struct session_state *self, struct kpm_header *hdr)
 	}
 
 	for (i = 0; i < test->worker_range; i++) {
-		struct pworker *pwrk;
+		struct worker *wrk;
 		struct kpm_test *msg;
 
 		msg = test->fwd[i];
@@ -841,11 +841,11 @@ server_msg_end_test(struct session_state *self, struct kpm_header *hdr)
 		}
 
 		kpm_trace("searching for worker %d", msg->specs[0].worker_id);
-		pwrk = session_find_worker_by_id(self, msg->specs[0].worker_id);
-		pwrk->busy = 0;
+		wrk = session_find_worker_by_id(self, msg->specs[0].worker_id);
+		wrk->busy = 0;
 
 		kpm_trace("Sending end test to worker");
-		kpm_send_u32(pwrk->fd, KPM_MSG_WORKER_END_TEST, req->id);
+		kpm_send_u32(wrk->fd, KPM_MSG_WORKER_END_TEST, req->id);
 	}
 
 	if (kpm_reply_empty(self->main_sock, hdr) < 1) {
@@ -888,8 +888,8 @@ static void session_handle_main_sock(struct session_state *self)
 	case KPM_MSG_TYPE_MODE:
 		server_msg_mode(self, hdr);
 		break;
-	case KPM_MSG_TYPE_SPAWN_PWORKER:
-		server_msg_spawn_pworker(self, hdr);
+	case KPM_MSG_TYPE_SPAWN_WORKER:
+		server_msg_spawn_worker(self, hdr);
 		break;
 	case KPM_MSG_TYPE_PIN_WORKER:
 		server_msg_pin_worker(self, hdr);
@@ -1044,7 +1044,7 @@ static void server_session_loop(int fd)
 	}
 
 	list_head_init(&self.connections);
-	list_head_init(&self.pworkers);
+	list_head_init(&self.workers);
 	list_head_init(&self.tests);
 
 	self.epollfd = epoll_create1(0);
