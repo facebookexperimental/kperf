@@ -388,7 +388,7 @@ worker_recv_finished(struct worker_state *self, struct worker_connection *conn)
 }
 
 /* == Main loop == */
-void* pworker_main(void* args)
+void* worker_main(void* args)
 {
 	struct worker_opts* opts = args;
 	struct worker_state self = {
