@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: BSD-3-Clause
+# Copyright Meta Platforms, Inc. and affiliates
 
 CCAN_PATH := ./ccan
 YNL_PATH := ./ynl-c

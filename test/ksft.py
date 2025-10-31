@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0
+# Copyright Meta Platforms, Inc. and affiliates
 
 """
 Script to run kperf.
