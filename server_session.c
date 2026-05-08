@@ -148,7 +148,7 @@ static int psp_exchange_keys(struct session_state *self, int cfd)
 		err(2, "YNL PSP Rx assoc: %s\n", self->psp->err.msg);
 
 	ret = kpm_send_psp_params(cfd, rsp->rx_key.spi, rsp->rx_key.key,
-				  rsp->rx_key._len.key);
+				  rsp->rx_key._present.key_len);
 	if (ret < 0)
 		err(3, "Can't send PSP params: %d\n", ret);
 	psp_rx_assoc_rsp_free(rsp);

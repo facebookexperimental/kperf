@@ -33,8 +33,7 @@
 #ifdef USE_CUDA
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-#ifdef CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE
+#ifdef USE_DMA_BUF_PCIE_MAP
 #define CUDA_FLAGS CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE
 #else
 #define CUDA_FLAGS 0

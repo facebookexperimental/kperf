@@ -22,6 +22,10 @@ ifdef USE_CUDA
     CFLAGS += -I/usr/local/cuda/include/ -DUSE_CUDA
 endif
 
+ifdef USE_DMA_BUF_PCIE_MAP
+    CFLAGS += -DUSE_DMA_BUF_PCIE_MAP
+endif
+
 include $(wildcard *.d)
 
 all: server client units
