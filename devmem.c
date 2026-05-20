@@ -18,6 +18,7 @@
 
 #include <linux/dma-buf.h>
 #include <linux/ethtool_netlink.h>
+#include <linux/memfd.h>
 #include <linux/sockios.h>
 #include <linux/udmabuf.h>
 
@@ -29,6 +30,15 @@
 
 #include "server.h"
 #include "proto_dbg.h"
+
+#ifndef MFD_HUGETLB
+#define MFD_HUGETLB 0x0004U
+#endif
+#ifndef MFD_HUGE_2MB
+#define MFD_HUGE_2MB (21U << 26)
+#endif
+
+#define HUGEPAGE_2MB (2UL * 1024 * 1024)
 
 #ifdef USE_CUDA
 #include <cuda.h>
@@ -313,7 +323,8 @@ static int rxq_num(int ifindex)
 
 static int bind_rx_queue(unsigned int ifindex, unsigned int dmabuf_fd,
 			 struct netdev_queue_id *queues,
-			 unsigned int n_queue_index, struct ynl_sock *ys)
+			 unsigned int n_queue_index, __u32 rx_page_size,
+			 struct ynl_sock *ys)
 {
 	struct netdev_bind_rx_req *req;
 	struct netdev_bind_rx_rsp *rsp;
@@ -326,6 +337,8 @@ static int bind_rx_queue(unsigned int ifindex, unsigned int dmabuf_fd,
 	netdev_bind_rx_req_set_ifindex(req, ifindex);
 	netdev_bind_rx_req_set_fd(req, dmabuf_fd);
 	__netdev_bind_rx_req_set_queues(req, queues, n_queue_index);
+	if (rx_page_size)
+		netdev_bind_rx_req_set_rx_page_size(req, rx_page_size);
 
 	rsp = netdev_bind_rx(ys, req);
 	if (!rsp) {
@@ -413,8 +426,10 @@ static int udmabuf_check_size(size_t size_mb)
 	return ret;
 }
 
-static struct memory_buffer *udmabuf_alloc(size_t size)
+static struct memory_buffer *udmabuf_alloc(size_t size, __u32 rx_page_size)
 {
+	unsigned int memfd_flags = MFD_ALLOW_SEALING;
+	long page_sz = sysconf(_SC_PAGESIZE);
 	struct udmabuf_create create;
 	struct memory_buffer *mem;
 	int ret;
@@ -435,7 +450,10 @@ static struct memory_buffer *udmabuf_alloc(size_t size)
 		goto free_mem;
 	}
 
-	mem->memfd = memfd_create("udmabuf-test", MFD_ALLOW_SEALING);
+	if (rx_page_size && (long)rx_page_size > page_sz)
+		memfd_flags |= MFD_HUGETLB | MFD_HUGE_2MB;
+
+	mem->memfd = memfd_create("udmabuf-test", memfd_flags);
 	if (mem->memfd < 0) {
 		warn("memfd_create() failed");
 		goto close_devfd;
@@ -446,6 +464,10 @@ static struct memory_buffer *udmabuf_alloc(size_t size)
 		warn("fcntl() failed");
 		goto close_memfd;
 	}
+
+	/* hugetlbfs only accepts hugepage-aligned sizes. */
+	if (memfd_flags & MFD_HUGETLB)
+		size = (size + HUGEPAGE_2MB - 1) & ~(HUGEPAGE_2MB - 1);
 
 	ret = ftruncate(mem->memfd, size);
 	if (ret < 0) {
@@ -634,7 +656,7 @@ static int cuda_dev_init(struct pci_dev *dev)
 	return 0;
 }
 
-static struct memory_buffer *cuda_alloc(size_t size)
+static struct memory_buffer *cuda_alloc(size_t size, __u32 rx_page_size __attribute__((unused)))
 {
 	struct memory_buffer *mem;
 	size_t page_size;
@@ -809,7 +831,7 @@ void unreserve_queues(char *ifname, int rss_context)
 
 /* Setup Devmem RX */
 int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t dmabuf_rx_size_mb, int num_queues,
+		 size_t dmabuf_rx_size_mb, int num_queues, __u32 rx_page_size,
 		 enum memory_provider_type provider,
 		 struct pci_dev *dev)
 {
@@ -841,7 +863,7 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		goto sock_destroy;
 	}
 
-	devmem->mem = rxmp->alloc(dmabuf_rx_size_mb * 1024 * 1024);
+	devmem->mem = rxmp->alloc(dmabuf_rx_size_mb * 1024 * 1024, rx_page_size);
 	if (!devmem->mem) {
 		warnx("Failed to allocate memory");
 		ret = -1;
@@ -862,9 +884,10 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
 		queues[i].id = max_kernel_queue + i;
 	}
 
-        devmem->mem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem->fd, queues,
-                                          num_queues, devmem->ys);
-        if (devmem->mem->dmabuf_id < 0) {
+	devmem->mem->dmabuf_id = bind_rx_queue(ifindex, devmem->mem->fd, queues,
+					       num_queues, rx_page_size,
+					       devmem->ys);
+	if (devmem->mem->dmabuf_id < 0) {
 		warnx("Failed to bind RX queue");
 		ret = -1;
 		goto free_queues;
@@ -1139,7 +1162,7 @@ int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_ty
 	if (txmp->dev_init && txmp->dev_init(&devmem->tx_dev) < 0)
 		return -1;
 
-	devmem->tx_mem = txmp->alloc(devmem->dmabuf_tx_size_mb * 1024 * 1024);
+	devmem->tx_mem = txmp->alloc(devmem->dmabuf_tx_size_mb * 1024 * 1024, 0);
 	if (!devmem->tx_mem) {
 		warnx("Failed to allocate devmem tx buffer");
 		return -1;

@@ -62,6 +62,7 @@ static struct {
 	unsigned int dmabuf_rx_size_mb;
 	unsigned int dmabuf_tx_size_mb;
 	unsigned int num_rx_queues;
+	unsigned int rx_page_size;
 	bool validate;
 	bool iou_src;
 	bool iou_dst;
@@ -86,6 +87,7 @@ static struct {
 	.dmabuf_rx_size_mb = 128,
 	.dmabuf_tx_size_mb = 128,
 	.num_rx_queues = 1,
+	.rx_page_size = 0,
 	.devmem_rx_memory = MEMORY_PROVIDER_HOST,
 	.devmem_dst_dev = {
 		.domain = DEVICE_DOMAIN_ANY,
@@ -277,6 +279,10 @@ static const struct opt_table opts[] = {
 		     "Select the memory provider for TCP Devmem TX"),
 	OPT_WITH_ARG("--num-rx-queues <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.num_rx_queues, "Number of RX queues for TCP Devmem mode"),
+	OPT_WITH_ARG("--rx-page-size <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.rx_page_size,
+		     "RX page size in bytes for TCP Devmem, "
+		     "must be a power of two and >= PAGE_SIZE, 0 = kernel default"),
 	OPT_WITH_ARG("--validate <yes|no>", opt_set_bool_arg, NULL, &opt.validate,
 		     "Validate payload. Default is no when using --devmem-rx; otherwise, default is yes"),
 	OPT_WITH_ARG("--devmem-dst-dev <arg>", opt_set_dev, opt_show_dev,
@@ -839,6 +845,7 @@ int main(int argc, char *argv[])
 		.dmabuf_rx_size_mb = opt.dmabuf_rx_size_mb,
 		.dmabuf_tx_size_mb = opt.dmabuf_tx_size_mb,
 		.num_rx_queues = opt.num_rx_queues,
+		.rx_page_size = opt.rx_page_size,
 		.validate = opt.validate,
 		.iou = opt.iou_dst,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
@@ -852,6 +859,7 @@ int main(int argc, char *argv[])
 		.dmabuf_rx_size_mb = opt.dmabuf_rx_size_mb,
 		.dmabuf_tx_size_mb = opt.dmabuf_tx_size_mb,
 		.num_rx_queues = opt.num_rx_queues,
+		.rx_page_size = opt.rx_page_size,
 		.addr = src_addr,
 		.validate = opt.validate,
 		.iou = opt.iou_src,

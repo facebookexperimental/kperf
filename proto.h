@@ -168,6 +168,7 @@ struct kpm_mode {
 	__u32 dmabuf_rx_size_mb;
 	__u32 dmabuf_tx_size_mb;
 	__u32 num_rx_queues;
+	__u32 rx_page_size;
 	struct sockaddr_in6 addr;
 
 	__u8 validate;
