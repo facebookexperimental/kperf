@@ -22,7 +22,6 @@
 #define PATTERN_PERIOD 255
 
 struct server_session {
-	int cfd;
 	pid_t pid;
 	struct list_node sessions;
 };
@@ -131,7 +130,8 @@ struct worker_opts {
 };
 
 struct server_session *
-server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen);
+server_session_spawn(int fd, const int *listen_fds,
+		     unsigned int num_listen_fds);
 
 void* worker_main(void* args);
 

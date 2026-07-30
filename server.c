@@ -276,7 +276,7 @@ int main(int argc, char *argv[])
 
 		if (opt.addr)
 			log_address("Accepted %s", &sockaddr);
-		ses = server_session_spawn(cfd, &sockaddr, &addrlen);
+		ses = server_session_spawn(cfd, fds, num_fds);
 		if (ses)
 			server_session_add(ses);
 reap_child:

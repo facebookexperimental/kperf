@@ -1202,13 +1202,15 @@ static NORETURN void server_session(int fd)
 }
 
 struct server_session *
-server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen)
+server_session_spawn(int fd, const int *listen_fds, unsigned int num_listen_fds)
 {
 	struct server_session *ses;
+	unsigned int i;
 
 	if (get_nprocs() > KPERF_MAX_CPUS) {
 		warnx("Too many CPUs in the system: %d, proto has max of %d",
 		      get_nprocs(), KPERF_MAX_CPUS);
+		close(fd);
 		return NULL;
 	}
 
@@ -1220,9 +1222,19 @@ server_session_spawn(int fd, struct sockaddr_in6 *addr, socklen_t *addrlen)
 	memset(ses, 0, sizeof(*ses));
 
 	ses->pid = fork();
-	if (ses->pid)
+	if (ses->pid < 0) {
+		warn("Failed to fork session");
+		close(fd);
+		free(ses);
+		return NULL;
+	}
+	if (ses->pid) {
+		close(fd);
 		return ses;
+	}
 
 	free(ses);
+	for (i = 0; i < num_listen_fds; i++)
+		close(listen_fds[i]);
 	server_session(fd);
 }
