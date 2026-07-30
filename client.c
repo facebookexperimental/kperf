@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
@@ -692,36 +691,26 @@ dump_result_machine(struct kpm_test_results *result,
 	printf(local ? "," : "\n");
 }
 
-/* copied from devmem.c */
-static void inet_to_inet6(struct sockaddr *addr, struct sockaddr_in6 *out)
+static int
+sockaddr_to_inet6(const struct sockaddr *addr, socklen_t len,
+		  struct sockaddr_in6 *out)
 {
-	out->sin6_addr.s6_addr32[3] = ((struct sockaddr_in6 *)addr)->sin6_addr.s6_addr32[0];
-	out->sin6_addr.s6_addr32[0] = 0;
-	out->sin6_addr.s6_addr32[1] = 0;
-	out->sin6_addr.s6_addr16[4] = 0;
+	const struct sockaddr_in *sin = (const void *)addr;
+
+	if (addr->sa_family == AF_INET6 && len >= sizeof(*out)) {
+		memcpy(out, addr, sizeof(*out));
+		return 0;
+	}
+	if (addr->sa_family != AF_INET || len < sizeof(*sin))
+		return -1;
+
+	memset(out, 0, sizeof(*out));
+	out->sin6_family = AF_INET6;
+	out->sin6_port = sin->sin_port;
 	out->sin6_addr.s6_addr16[5] = 0xffff;
-	out->sin6_family = AF_INET6;
-}
+	out->sin6_addr.s6_addr32[3] = sin->sin_addr.s_addr;
 
-int inet_sockaddr(const char *str, struct sockaddr_in6 *out)
-{
-	struct sockaddr_in *sa4;
-	struct sockaddr_in6 tmp;
-
-	out->sin6_family = AF_INET6;
-	if (inet_pton(AF_INET6, str, &(out->sin6_addr)) == 1) {
-		out->sin6_family = AF_INET6;
-		return 0;
-	}
-
-	sa4 = (struct sockaddr_in *)&tmp;
-	if (inet_pton(AF_INET, str, &(sa4->sin_addr)) == 1) {
-		sa4->sin_family = AF_INET;
-		inet_to_inet6((void *)sa4, out);
-		return 0;
-	}
-
-	return -1;
+	return 0;
 }
 
 int main(int argc, char *argv[])
@@ -731,16 +720,17 @@ int main(int argc, char *argv[])
 	unsigned int src_ncpus, dst_ncpus;
 	struct __kpm_generic_u32 *ack_id;
 	__u32 *src_wrk_cpu, *dst_wrk_cpu;
+	struct sockaddr_storage src_peer;
 	struct kpm_connect_reply *conns;
 	struct kpm_test_results *result;
 	__u32 *src_wrk_id, *dst_wrk_id;
 	struct sockaddr_in6 conn_addr;
 	__u32 src_tst_id, dst_tst_id;
 	struct sockaddr_in6 src_addr;
+	socklen_t len, src_peer_len;
 	struct addrinfo *addr;
 	struct kpm_test *test;
 	unsigned int i;
-	socklen_t len;
 	int src, dst;
 	size_t sz;
 	int seq;
@@ -771,9 +761,6 @@ int main(int argc, char *argv[])
 		if (opt.n_conns != 2)
 			errx(1, "Cross-pin only works with 2 connections");
 	}
-
-	if (inet_sockaddr(opt.src, &src_addr) < 0)
-		errx(1, "failed to get sockaddr from %s\n", opt.src);
 
 	/* io_uring doesn't support devmem yet */
 	if (opt.devmem_rx && opt.iou_dst)
@@ -811,6 +798,11 @@ int main(int argc, char *argv[])
 	freeaddrinfo(addr);
 	if (src < 1)
 		err(1, "Failed to connect");
+	src_peer_len = sizeof(src_peer);
+	if (getpeername(src, (void *)&src_peer, &src_peer_len) < 0)
+		err(1, "Failed to get source server address");
+	if (sockaddr_to_inet6((void *)&src_peer, src_peer_len, &src_addr) < 0)
+		errx(1, "Unsupported source server address family");
 
 	addr = net_client_lookup(opt.dst, opt.dst_svc, AF_UNSPEC, SOCK_STREAM);
 	if (!addr)
