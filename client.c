@@ -701,23 +701,35 @@ static void inet_to_inet6(struct sockaddr *addr, struct sockaddr_in6 *out)
 
 int inet_sockaddr(const char *str, struct sockaddr_in6 *out)
 {
-	struct sockaddr_in *sa4;
-	struct sockaddr_in6 tmp;
+	struct addrinfo *res, *ai;
+	int err;
 
-	out->sin6_family = AF_INET6;
-	if (inet_pton(AF_INET6, str, &(out->sin6_addr)) == 1) {
+	res = net_client_lookup(str, NULL, AF_UNSPEC, SOCK_STREAM);
+	if (!res) {
+		warnx("Failed to resolve %s", str);
+		return -1;
+	}
+
+	memset(out, 0, sizeof(*out));
+	err = -1;
+	for (ai = res; ai; ai = ai->ai_next) {
+		if (ai->ai_family == AF_INET6)
+			memcpy(out, ai->ai_addr, sizeof(*out));
+		else if (ai->ai_family == AF_INET)
+			inet_to_inet6(ai->ai_addr, out);
+		else
+			continue;
+
 		out->sin6_family = AF_INET6;
-		return 0;
+		out->sin6_port = 0;
+		err = 0;
+		break;
 	}
+	if (err)
+		warnx("No IP address found for %s", str);
 
-	sa4 = (struct sockaddr_in *)&tmp;
-	if (inet_pton(AF_INET, str, &(sa4->sin_addr)) == 1) {
-		sa4->sin_family = AF_INET;
-		inet_to_inet6((void *)sa4, out);
-		return 0;
-	}
-
-	return -1;
+	freeaddrinfo(res);
+	return err;
 }
 
 int main(int argc, char *argv[])
