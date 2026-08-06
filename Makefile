@@ -5,6 +5,10 @@ CCAN_PATH := ./ccan
 YNL_PATH := ./ynl-c
 LIBURING_PATH := ./liburing
 
+CCAN_MODULES := asort daemonize err fdpass list net noerr opt str take tal time
+CCAN_SRCS := $(foreach module,$(CCAN_MODULES),\
+	$(wildcard $(CCAN_PATH)/ccan/$(module)/*.c))
+CCAN_OBJS := $(CCAN_SRCS:.c=.o)
 CCAN_CONFIG := $(CCAN_PATH)/config.h
 
 CC=gcc
@@ -42,10 +46,10 @@ client: $(CCAN_PATH)/libccan.a client.o proto.o bipartite_match.o
 $(CCAN_CONFIG): $(CCAN_PATH)/Makefile $(CCAN_PATH)/tools/configurator/configurator.c
 	$(MAKE) -C $(CCAN_PATH) config.h
 
-$(CCAN_PATH)/libccan.a: $(CCAN_CONFIG)
-	$(MAKE) -C $(CCAN_PATH)/
+$(CCAN_PATH)/libccan.a: Makefile $(CCAN_CONFIG) $(CCAN_SRCS) $(CCAN_PATH)/Makefile
+	$(MAKE) -C $(CCAN_PATH) config.h $(patsubst $(CCAN_PATH)/%,%,$(CCAN_OBJS))
 	$(RM) $@
-	$(AR) rcs $@ $(CCAN_PATH)/ccan/*/*.o
+	$(AR) rcs $@ $(CCAN_OBJS)
 
 $(YNL_PATH)/libynl.a:
 	$(MAKE) -C $(YNL_PATH)
