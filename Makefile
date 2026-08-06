@@ -44,7 +44,8 @@ $(CCAN_CONFIG): $(CCAN_PATH)/Makefile $(CCAN_PATH)/tools/configurator/configurat
 
 $(CCAN_PATH)/libccan.a: $(CCAN_CONFIG)
 	$(MAKE) -C $(CCAN_PATH)/
-	ar rcs $(CCAN_PATH)/libccan.a $(CCAN_PATH)/ccan/*/*.o
+	$(RM) $@
+	$(AR) rcs $@ $(CCAN_PATH)/ccan/*/*.o
 
 $(YNL_PATH)/libynl.a:
 	$(MAKE) -C $(YNL_PATH)
