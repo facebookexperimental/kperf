@@ -5,6 +5,8 @@ CCAN_PATH := ./ccan
 YNL_PATH := ./ynl-c
 LIBURING_PATH := ./liburing
 
+CCAN_CONFIG := $(CCAN_PATH)/config.h
+
 CC=gcc
 CFLAGS=-std=gnu99   -I$(CCAN_PATH)   -O2   -W -Wall -Wextra -Wno-unused-parameter -Wshadow   -DDEBUG   -g
 CFLAGS += -I$(YNL_PATH)/include/
@@ -37,7 +39,10 @@ server: $(CCAN_PATH)/libccan.a $(YNL_PATH)/libynl.a $(LIBURING_PATH)/src/liburin
 client: $(CCAN_PATH)/libccan.a client.o proto.o bipartite_match.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
-$(CCAN_PATH)/libccan.a:
+$(CCAN_CONFIG): $(CCAN_PATH)/Makefile $(CCAN_PATH)/tools/configurator/configurator.c
+	$(MAKE) -C $(CCAN_PATH) config.h
+
+$(CCAN_PATH)/libccan.a: $(CCAN_CONFIG)
 	$(MAKE) -C $(CCAN_PATH)/
 	ar rcs $(CCAN_PATH)/libccan.a $(CCAN_PATH)/ccan/*/*.o
 
