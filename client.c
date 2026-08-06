@@ -107,9 +107,10 @@ static struct {
 
 #define dbg(fmt...) while (0) { warnx(fmt); }
 
-static void opt_show_uinthex(char buf[OPT_SHOW_LEN], const unsigned int *ui)
+static bool opt_show_uinthex(char *buf, size_t len, const unsigned int *ui)
 {
-	sprintf(buf, "0x%x", *ui);
+	snprintf(buf, len, "0x%x", *ui);
+	return true;
 }
 
 static char *arg_bad(const char *fmt, const char *arg)
@@ -165,33 +166,36 @@ opt_set_dev(const char *arg, struct pci_dev *dev)
 	return arg_bad("'%s' invalid PCI ID format. Expected format: domain:bus:device\n", arg);
 }
 
-static void
-opt_show_memory_provider(char buf[OPT_SHOW_LEN], const enum memory_provider_type *p)
+static bool
+opt_show_memory_provider(char *buf, size_t len,
+			 const enum memory_provider_type *p)
 {
 	switch (*p) {
 	case MEMORY_PROVIDER_HOST:
-		strncpy(buf, "host", OPT_SHOW_LEN);
+		strncpy(buf, "host", len);
 		break;
 	case MEMORY_PROVIDER_CUDA:
-		strncpy(buf, "cuda", OPT_SHOW_LEN);
+		strncpy(buf, "cuda", len);
 		break;
 	default:
 		/* inval */
-		strncpy(buf, "invalid", OPT_SHOW_LEN);
+		strncpy(buf, "invalid", len);
 		break;
 	}
+	return true;
 }
 
-static void
-opt_show_dev(char buf[OPT_SHOW_LEN], const struct pci_dev *dev)
+static bool
+opt_show_dev(char *buf, size_t len, const struct pci_dev *dev)
 {
 	if (dev->domain == DEVICE_DOMAIN_ANY &&
 	    dev->bus == DEVICE_BUS_ANY &&
 	    dev->device == DEVICE_DEVICE_ANY)
-		strncpy(buf, "any", OPT_SHOW_LEN);
+		strncpy(buf, "any", len);
 	else
-		snprintf(buf, OPT_SHOW_LEN, "%hx:%hhx:%hhx",
+		snprintf(buf, len, "%hx:%hhx:%hhx",
 			 dev->domain, dev->bus, dev->device);
+	return true;
 }
 
 static const struct opt_table opts[] = {
