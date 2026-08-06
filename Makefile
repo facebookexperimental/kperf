@@ -56,7 +56,7 @@ $(YNL_PATH)/libynl.a:
 
 $(LIBURING_PATH)/src/liburing.a:
 	@cd $(LIBURING_PATH) && ./configure --cc=$(CC)
-	$(MAKE) -C $(LIBURING_PATH)
+	$(MAKE) -C $(LIBURING_PATH) library
 
 clean:
 	rm -rf *.o *.d *~ bipartite_match cpu_stat
