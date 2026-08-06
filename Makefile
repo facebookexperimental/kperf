@@ -38,22 +38,22 @@ client: $(CCAN_PATH)/libccan.a client.o proto.o bipartite_match.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
 $(CCAN_PATH)/libccan.a:
-	make -C $(CCAN_PATH)/
+	$(MAKE) -C $(CCAN_PATH)/
 	ar rcs $(CCAN_PATH)/libccan.a $(CCAN_PATH)/ccan/*/*.o
 
 $(YNL_PATH)/libynl.a:
-	make -C $(YNL_PATH)
+	$(MAKE) -C $(YNL_PATH)
 
 $(LIBURING_PATH)/src/liburing.a:
 	@cd $(LIBURING_PATH) && ./configure --cc=$(CC)
-	make -C $(LIBURING_PATH)
+	$(MAKE) -C $(LIBURING_PATH)
 
 clean:
 	rm -rf *.o *.d *~ bipartite_match cpu_stat
 
 distclean:
 	rm -rf *.o *.d *~ bipartite_match cpu_stat server client $(CCAN_PATH)/libccan.a
-	make clean -C $(LIBURING_PATH)
+	$(MAKE) clean -C $(LIBURING_PATH)
 
 bipartite_match: $(CCAN_PATH)/libccan.a
 	$(CC) $(CFLAGS) -DKPERF_UNITS bipartite_match.c -o bipartite_match $(CCAN_PATH)/libccan.a
