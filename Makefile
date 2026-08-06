@@ -71,7 +71,7 @@ bipartite_match: $(CCAN_PATH)/libccan.a
 cpu_stat: $(CCAN_PATH)/libccan.a
 	$(CC) $(CFLAGS) -DKPERF_UNITS cpu_stat.c -o cpu_stat $(CCAN_PATH)/libccan.a
 
-%.o: %.c
+%.o: %.c | $(CCAN_CONFIG)
 	$(COMPILE.c) -MMD -o $@ $<
 
 .PHONY: all clean units ccan distclean
