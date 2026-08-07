@@ -334,6 +334,7 @@ int kpm_reply_conn_id(int fd, struct kpm_header *hdr, __u32 id, __u32 cpu,
 int kpm_xchg_hello(int fd, unsigned int *ncpus);
 
 int kpm_req_tcp_sock(int fd, struct sockaddr_in6 *addr, socklen_t *len);
+int kpm_req_test(int fd, struct kpm_test *test, size_t size, __u32 *test_id);
 int kpm_req_end_test(int fd, __u32 test_id);
 int kpm_req_tls(int fd, __u32 conn_id, __u32 dir_mask,
 		void *info, socklen_t len);

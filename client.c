@@ -718,7 +718,6 @@ int main(int argc, char *argv[])
 	enum kpm_rx_mode rx_mode = KPM_RX_MODE_SOCKET;
 	enum kpm_tx_mode tx_mode = KPM_TX_MODE_SOCKET;
 	unsigned int src_ncpus, dst_ncpus;
-	struct __kpm_generic_u32 *ack_id;
 	__u32 *src_wrk_cpu, *dst_wrk_cpu;
 	struct sockaddr_storage src_peer;
 	struct kpm_connect_reply *conns;
@@ -733,7 +732,6 @@ int main(int argc, char *argv[])
 	unsigned int i;
 	int src, dst;
 	size_t sz;
-	int seq;
 
 	opt_register_table(opts, NULL);
 
@@ -949,17 +947,11 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	seq = kpm_send(dst, &test->hdr, sz, KPM_MSG_TYPE_TEST);
-
-	ack_id = kpm_receive(dst);
-	if (!kpm_good_reply(ack_id, KPM_MSG_TYPE_TEST, seq)) {
-		warnx("Invalid ack for test %d %d",
-		      ack_id->hdr.type, ack_id->hdr.len);
+	if (kpm_req_test(dst, test, sz, &dst_tst_id)) {
+		free(test);
 		goto out_id;
 	}
-	dst_tst_id = ack_id->val;
 	dbg("Test id dst %d", dst_tst_id);
-	free(ack_id);
 
 	test->active = 1;
 	for (i = 0; i < opt.n_conns; i++) {
@@ -967,18 +959,12 @@ int main(int argc, char *argv[])
 		test->specs[i].worker_id = src_wrk_id[i];
 	}
 
-	seq = kpm_send(src, &test->hdr, sz, KPM_MSG_TYPE_TEST);
-	free(test);
-
-	ack_id = kpm_receive(src);
-	if (!kpm_good_reply(ack_id, KPM_MSG_TYPE_TEST, seq)) {
-		warnx("Invalid ack for test %d %d",
-		      ack_id->hdr.type, ack_id->hdr.len);
+	if (kpm_req_test(src, test, sz, &src_tst_id)) {
+		free(test);
 		goto out_id;
 	}
-	src_tst_id = ack_id->val;
+	free(test);
 	dbg("Test id src %d", src_tst_id);
-	free(ack_id);
 
 	/* Source worker is done */
 	result = kpm_receive(src);

@@ -367,6 +367,34 @@ int kpm_req_tcp_sock(int fd, struct sockaddr_in6 *addr, socklen_t *len)
 	return 0;
 }
 
+int kpm_req_test(int fd, struct kpm_test *test, size_t size, __u32 *test_id)
+{
+	struct __kpm_generic_u32 *repl;
+	int id;
+
+	id = kpm_send(fd, &test->hdr, size, KPM_MSG_TYPE_TEST);
+	if (id < 0) {
+		warnx("Failed to start test");
+		return id;
+	}
+
+	repl = kpm_receive(fd);
+	if (!repl) {
+		warnx("Failed to start test - no response");
+		return -1;
+	}
+
+	if (!kpm_good_reply(repl, KPM_MSG_TYPE_TEST, id)) {
+		warnx("Failed to start test - bad reply");
+		free(repl);
+		return -1;
+	}
+
+	*test_id = repl->val;
+	free(repl);
+	return 0;
+}
+
 int kpm_req_end_test(int fd, __u32 test_id)
 {
 	struct kpm_empty *repl;
