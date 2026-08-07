@@ -252,7 +252,7 @@ server_msg_tcp_acceptor(struct session_state *self, struct kpm_header *req)
 	}
 	addr.sin6_port = 0;
 
-	self->tcp_sock = socket(addr.sin6_family, SOCK_STREAM, 0);
+	self->tcp_sock = socket(addr.sin6_family, SOCK_STREAM | SOCK_NONBLOCK, 0);
 	if (self->tcp_sock < 0) {
 		warn("Failed to open socket");
 		self->quit = 1;
@@ -1105,18 +1105,22 @@ static void session_handle_worker(struct session_state *self, int fd)
 
 static void session_handle_accept_sock(struct session_state *self)
 {
-	struct sockaddr_in6 sockaddr;
-	socklen_t addrlen;
-	int cfd;
-
 	__kpm_trace(">>", "accept");
 
-	addrlen = sizeof(sockaddr);
-	cfd = accept(self->tcp_sock, (void *)&sockaddr, &addrlen);
-	if (cfd < 0)
-		warn("Failed to accept conn");
-	else
+	while (1) {
+		struct sockaddr_in6 sockaddr;
+		socklen_t addrlen;
+		int cfd;
+
+		addrlen = sizeof(sockaddr);
+		cfd = accept(self->tcp_sock, (void *)&sockaddr, &addrlen);
+		if (cfd < 0) {
+			if (errno != EAGAIN && errno != EWOULDBLOCK)
+				warn("Failed to accept conn");
+			return;
+		}
 		session_new_conn(self, cfd);
+	}
 }
 
 static void server_session_loop(int fd)
