@@ -8,7 +8,8 @@
 
 void print_tcp_info(struct tcp_info *ti)
 {
-	printf("TCP stats\n"
+	fprintf(stderr,
+	       "TCP stats\n"
 	       "         %u %u %u %u %u %u %u %u %u %u\n"
 	       "         %u %u %u %u %u %u %u %u %u\n"
 	       "Times:   %u %u %u %u\n"
