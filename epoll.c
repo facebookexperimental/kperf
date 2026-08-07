@@ -224,7 +224,7 @@ kill_conn:
 	worker_kill_conn(self, conn);
 }
 
-static void
+static bool
 ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 	       unsigned int events)
 {
@@ -250,17 +250,17 @@ ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 			warnx("zero send chunk:%zd to_send:%lld to_recv:%lld",
 			      chunk, conn->to_send, conn->to_recv);
 			worker_kill_conn(self, conn);
-			return;
+			return false;
 		}
 		if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				kpm_dbg("send full (0 sent)");
 				ep_send_arm(self, conn, events);
-				return;
+				return true;
 			}
 			warn("Send failed");
 			worker_kill_conn(self, conn);
-			return;
+			return false;
 		}
 
 		conn->to_send -= n;
@@ -280,9 +280,11 @@ ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 		if (n != (ssize_t)chunk) {
 			kpm_dbg("send full (partial)");
 			ep_send_arm(self, conn, events);
-			return;
+			return true;
 		}
 	}
+
+	return true;
 }
 
 static ssize_t
@@ -355,7 +357,7 @@ ep_handle_regular_recv(struct worker_state *self, struct worker_connection *conn
 	return n;
 }
 
-static void
+static bool
 ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 {
 	unsigned int rep = 10;
@@ -376,7 +378,7 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 		if (n == 0) {
 			warnx("zero recv");
 			worker_kill_conn(self, conn);
-			break;
+			return false;
 		}
 		if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -385,7 +387,7 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 				break;
 			warn("Recv failed");
 			worker_kill_conn(self, conn);
-			break;
+			return false;
 		}
 
 		conn->to_recv -= n;
@@ -394,7 +396,8 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 		if (!conn->to_recv) {
 			worker_recv_finished(self, conn);
 			if (conn->to_send) {
-				ep_handle_send(self, conn, 0);
+				if (!ep_handle_send(self, conn, 0))
+					return false;
 				break;
 			}
 		}
@@ -402,7 +405,7 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 		if (n != conn->read_size)
 			break;
 	}
-
+	return true;
 }
 
 static void
@@ -412,16 +415,22 @@ ep_handle_conn(struct worker_state *self, int fd, unsigned int events)
 	struct worker_connection *conn;
 
 	conn = ep_find_connection_by_fd(self, fd);
+	/* A control event earlier in this epoll batch may have removed it. */
+	if (!conn)
+		return;
 
 	if (events & EPOLLOUT) {
-		if (conn->to_send)
-			ep_handle_send(self, conn, events);
-		else if (!conn->to_send_comp)
+		if (conn->to_send) {
+			if (!ep_handle_send(self, conn, events))
+				return;
+		} else if (!conn->to_send_comp) {
 			ep_send_disarm(self, conn, events);
+		}
 	}
 	if (events & EPOLLIN) {
 		if (conn->to_recv) {
-			ep_handle_recv(self, conn);
+			if (!ep_handle_recv(self, conn))
+				return;
 		} else if (!warnd_unexpected_pi) {
 			warnx("Unexpected POLLIN %x", events);
 			warnd_unexpected_pi = 1;
