@@ -843,11 +843,6 @@ int main(int argc, char *argv[])
 		.iou = opt.iou_dst,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
 	};
-	if (kpm_req_mode(dst, &dst_mode) < 0) {
-		warnx("Failed setup destination mode");
-		goto out;
-	}
-
 	struct kpm_mode src_mode = {
 		.rx_mode = rx_mode,
 		.tx_mode = tx_mode,
@@ -870,6 +865,11 @@ int main(int argc, char *argv[])
 	conns = spawn_conn(src, dst, &conn_addr, len);
 	if (!conns)
 		goto out;
+
+	if (kpm_req_mode(dst, &dst_mode) < 0) {
+		warnx("Failed setup destination mode");
+		goto out_id;
+	}
 
 	if (opt.tls || opt.tls_rx || opt.tls_tx) {
 		struct tls12_crypto_info_aes_gcm_128 aes128 = {};
