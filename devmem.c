@@ -867,13 +867,11 @@ int devmem_setup(struct session_state_devmem *devmem, int fd,
         if (devmem->mem->dmabuf_id < 0) {
 		warnx("Failed to bind RX queue");
 		ret = -1;
-		goto free_queues;
+		goto free_memory;
 	}
 
 	return 0;
 
-free_queues:
-	free(queues);
 free_memory:
 	rxmp->free(devmem->mem);
 sock_destroy:
