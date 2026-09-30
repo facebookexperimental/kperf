@@ -870,6 +870,17 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
+	/*
+	 * Set up the final destination RSS context before creating connections
+	 * so the bipartite matching observes the CPUs used by the test.
+	 */
+	if (dst_mode.rx_mode == KPM_RX_MODE_DEVMEM) {
+		if (kpm_req_setup_rx_steering(dst, dst_mode.num_rx_queues) < 0) {
+			warnx("Failed to setup destination RX steering");
+			goto out;
+		}
+	}
+
 	conns = spawn_conn(src, dst, &conn_addr, len);
 	if (!conns)
 		goto out;

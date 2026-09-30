@@ -6,12 +6,11 @@
 
 #include <sys/socket.h>
 
-int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
-		   int *out_ifindex, int *out_queue_id, int *out_rss_context);
-void unreserve_queues(char *ifname, int rss_context);
+struct rx_steering;
 
-int devmem_setup(struct session_state_devmem *devmem, int fd,
-		 size_t dmabuf_size, int num_queues, __u32 rx_page_size,
+int devmem_setup(struct session_state_devmem *devmem,
+		 struct rx_steering *steering, size_t dmabuf_size,
+		 int num_queues, __u32 rx_page_size,
 		 enum memory_provider_type provider, struct pci_dev *dev);
 int devmem_teardown(struct session_state_devmem *devmem);
 void devmem_teardown_tx(struct session_state_devmem *devmem);

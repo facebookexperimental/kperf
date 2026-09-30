@@ -14,6 +14,7 @@
 #include <ynl-c/ynl.h>
 
 #include "proto.h"
+#include "rx_steering.h"
 
 #ifdef USE_CUDA
 #include <cuda.h>
@@ -86,11 +87,9 @@ struct connection_devmem {
 
 struct session_state_devmem {
 	struct ynl_sock *ys;
-	char ifname[IFNAMSIZ];
 
 	/* RX */
 	struct memory_buffer *mem;
-	int rss_context;
 
 	/* TX */
 	struct memory_buffer *tx_mem;
