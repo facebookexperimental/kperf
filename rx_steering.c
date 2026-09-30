@@ -332,8 +332,9 @@ int rx_steering_find_iface(struct sockaddr_in6 *addr, char ifname[IFNAMSIZ])
 	return -ENODEV;
 }
 
-int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
-		   int *out_ifindex, int *out_queue_id, int *out_rss_context)
+static int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
+			  int *out_ifindex, int *out_queue_id,
+			  int *out_rss_context)
 {
 	struct sockaddr_in6 addr;
 	char ifname[IFNAMSIZ];
@@ -405,7 +406,7 @@ undo_rss:
 	return ret;
 }
 
-void unreserve_queues(char *ifname, int rss_context)
+static void unreserve_queues(char *ifname, int rss_context)
 {
 	int ifindex;
 	int rxqn;

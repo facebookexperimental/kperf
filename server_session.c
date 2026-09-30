@@ -664,15 +664,6 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 			return;
 		}
 	}
-	if (self->tcp_sock && req->iou && req->rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY) {
-		ret = iou_zerocopy_rx_setup(&self->iou_state, self->tcp_sock, req->num_rx_queues);
-		if (ret < 0) {
-			warnx("Failed to setup io_uring zero copy receive");
-			self->quit = 1;
-			return;
-		}
-	}
-
 	self->rx_mode = req->rx_mode;
 	self->tx_mode = req->tx_mode;
 	self->validate = req->validate;
@@ -742,15 +733,14 @@ server_msg_spawn_worker(struct session_state *self, struct kpm_header *hdr)
 	opts->devmem.mem = self->devmem.mem;
 	opts->devmem.dmabuf_id = dmabuf_id;
 	opts->iou.rx_size_mb = self->iou_state.rx_size_mb;
-	opts->iou.ifindex = self->iou_state.ifindex;
-	opts->iou.queue_id = self->iou_state.queue_id;
+	opts->iou.ifindex = self->rx_steering.ifindex;
+	opts->iou.queue_id = self->rx_steering.queue_id + self->worker_ids;
 	if (pthread_create(&wrk->thread, &attr, worker_main, opts) != 0) {
 		warnx("Failed to create worker thread");
 		free(opts);
 		goto err_free_attr;
 	}
 
-	self->iou_state.queue_id++;
 	wrk->id = ++self->worker_ids;
 	wrk->fd = p[0];
 
@@ -1229,8 +1219,6 @@ static void server_session_loop(int fd)
 	if (!self.tcp_sock && self.tx_mode == KPM_TX_MODE_DEVMEM)
 		devmem_teardown_tx(&self.devmem);
 	rx_steering_teardown(&self.rx_steering);
-	if (self.tcp_sock && self.iou && self.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
-		iou_zerocopy_rx_teardown(&self.iou_state);
 
 	if (self.psp)
 		ynl_sock_destroy(self.psp);

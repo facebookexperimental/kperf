@@ -874,7 +874,8 @@ int main(int argc, char *argv[])
 	 * Set up the final destination RSS context before creating connections
 	 * so the bipartite matching observes the CPUs used by the test.
 	 */
-	if (dst_mode.rx_mode == KPM_RX_MODE_DEVMEM) {
+	if (dst_mode.rx_mode == KPM_RX_MODE_DEVMEM ||
+	    (dst_mode.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY && dst_mode.iou)) {
 		if (kpm_req_setup_rx_steering(dst, dst_mode.num_rx_queues) < 0) {
 			warnx("Failed to setup destination RX steering");
 			goto out;
