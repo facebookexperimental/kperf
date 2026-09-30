@@ -5,6 +5,9 @@ CCAN_PATH := ./ccan
 YNL_PATH := ./ynl-c
 LIBURING_PATH := ./liburing
 
+YNL_SRCS := $(wildcard $(YNL_PATH)/*.c $(YNL_PATH)/generated/*.c)
+YNL_HDRS := $(wildcard $(YNL_PATH)/include/ynl-c/*.h $(YNL_PATH)/generated/*.h)
+
 CCAN_MODULES := asort daemonize err fdpass list net noerr opt str take tal time
 CCAN_SRCS := $(foreach module,$(CCAN_MODULES),\
 	$(wildcard $(CCAN_PATH)/ccan/$(module)/*.c))
@@ -40,7 +43,7 @@ endif
 server: $(CCAN_PATH)/libccan.a $(YNL_PATH)/libynl.a $(LIBURING_PATH)/src/liburing.a server.o server_session.o proto.o epoll.o iou.o worker.o devmem.o cpu_stat.o tcp.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
-client: $(CCAN_PATH)/libccan.a client.o proto.o bipartite_match.o
+client: $(CCAN_PATH)/libccan.a $(YNL_PATH)/libynl.a client.o proto.o bipartite_match.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
 $(CCAN_CONFIG): $(CCAN_PATH)/Makefile $(CCAN_PATH)/tools/configurator/configurator.c
@@ -51,7 +54,7 @@ $(CCAN_PATH)/libccan.a: Makefile $(CCAN_CONFIG) $(CCAN_SRCS) $(CCAN_PATH)/Makefi
 	$(RM) $@
 	$(AR) rcs $@ $(CCAN_OBJS)
 
-$(YNL_PATH)/libynl.a:
+$(YNL_PATH)/libynl.a: $(YNL_SRCS) $(YNL_HDRS) $(YNL_PATH)/Makefile
 	$(MAKE) -C $(YNL_PATH)
 
 $(LIBURING_PATH)/src/liburing.a:
@@ -59,10 +62,12 @@ $(LIBURING_PATH)/src/liburing.a:
 	$(MAKE) -C $(LIBURING_PATH) library
 
 clean:
-	rm -rf *.o *.d *~ bipartite_match cpu_stat
+	rm -rf *.o *.d *~ bipartite_match cpu_stat server client
+	$(MAKE) clean -C $(YNL_PATH)
+	rm -f $(YNL_PATH)/libynl.a
 
-distclean:
-	rm -rf *.o *.d *~ bipartite_match cpu_stat server client $(CCAN_PATH)/libccan.a
+distclean: clean
+	rm -rf $(CCAN_PATH)/libccan.a
 	$(MAKE) clean -C $(LIBURING_PATH)
 
 bipartite_match: $(CCAN_PATH)/libccan.a
