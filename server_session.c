@@ -68,7 +68,7 @@ struct connection {
 struct worker {
 	unsigned int id;
 	int fd;
-	pid_t pid;
+	pthread_t thread;
 	int busy;
 	struct list_node workers;
 };
@@ -666,11 +666,10 @@ static void
 server_msg_spawn_worker(struct session_state *self, struct kpm_header *hdr)
 {
 	struct worker_opts *opts = NULL;
-	struct worker *wrk = NULL;
 	struct epoll_event ev = {};
-	int p[2], dmabuf_id;
+	struct worker *wrk = NULL;
 	pthread_attr_t attr;
-	pthread_t thread;
+	int p[2], dmabuf_id;
 
 	wrk = malloc(sizeof(*wrk));
 	if (!wrk) {
@@ -707,7 +706,7 @@ server_msg_spawn_worker(struct session_state *self, struct kpm_header *hdr)
 	opts->iou.rx_size_mb = self->iou_state.rx_size_mb;
 	opts->iou.ifindex = self->iou_state.ifindex;
 	opts->iou.queue_id = self->iou_state.queue_id;
-	if (pthread_create(&thread, &attr, worker_main, opts) != 0) {
+	if (pthread_create(&wrk->thread, &attr, worker_main, opts) != 0) {
 		warnx("Failed to create worker thread");
 		free(opts);
 		goto err_free_attr;
@@ -749,6 +748,7 @@ server_msg_pin_worker(struct session_state *self, struct kpm_header *hdr)
 	struct kpm_pin_worker *req;
 	struct worker *wrk;
 	cpu_set_t set;
+	int err;
 
 	if (hdr->len < sizeof(struct kpm_pin_worker)) {
 		warn("Invalid request in %s", __func__);
@@ -780,9 +780,10 @@ server_msg_pin_worker(struct session_state *self, struct kpm_header *hdr)
 		CPU_SET(req->cpu, &set);
 	}
 
-	if (sched_setaffinity(wrk->pid, sizeof(set), &set) < 0) {
-		warn("Failed to pin worker to CPU");
-		kpm_reply_error(self->main_sock, hdr, errno);
+	err = pthread_setaffinity_np(wrk->thread, sizeof(set), &set);
+	if (err) {
+		warnx("Failed to pin worker to CPU: %s", strerror(err));
+		kpm_reply_error(self->main_sock, hdr, err);
 		return;
 	}
 
