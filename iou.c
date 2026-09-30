@@ -15,7 +15,7 @@
 
 #include "proto.h"
 #include "proto_dbg.h"
-#include "devmem.h"
+#include "rx_steering.h"
 #include "worker.h"
 
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];

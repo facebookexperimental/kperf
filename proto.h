@@ -28,6 +28,7 @@ enum kpm_msg_type {
 	KPM_MSG_TYPE_MAX_PACING,
 	KPM_MSG_TYPE_TCP_CC,
 	KPM_MSG_TYPE_MODE,
+	KPM_MSG_TYPE_SETUP_RX_STEERING,
 	KPM_MSG_TYPE_TEST,
 	KPM_MSG_TYPE_TEST_RESULT,
 	KPM_MSG_TYPE_END_TEST,
@@ -174,6 +175,11 @@ struct kpm_mode {
 	__u8 validate;
 	__u8 iou;
 	__u32 iou_rx_size_mb;
+};
+
+struct kpm_setup_rx_steering {
+	struct kpm_header hdr;
+	__u32 num_queues;
 };
 
 enum kpm_tls_mask {
@@ -342,6 +348,7 @@ int kpm_req_tls(int fd, __u32 conn_id, __u32 dir_mask,
 int kpm_req_pacing(int fd, __u32 conn_id, __u32 max_pace);
 int kpm_req_tcp_cc(int fd, __u32 conn_id, char *cc_name);
 int kpm_req_mode(int fd, struct kpm_mode *mode);
+int kpm_req_setup_rx_steering(int fd, __u32 num_queues);
 int kpm_req_disconnect(int fd, __u32 connection_id);
 
 #endif /* PROTO_H */

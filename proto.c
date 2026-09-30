@@ -534,6 +534,37 @@ kpm_req_mode(int fd, struct kpm_mode *mode)
 	return 0;
 }
 
+int kpm_req_setup_rx_steering(int fd, __u32 num_queues)
+{
+	struct kpm_setup_rx_steering msg = {
+		.num_queues = num_queues,
+	};
+	struct kpm_empty *repl;
+	int id;
+
+	id = kpm_send(fd, &msg.hdr, sizeof(msg),
+		      KPM_MSG_TYPE_SETUP_RX_STEERING);
+	if (id < 0) {
+		warnx("Failed to request RX steering setup");
+		return id;
+	}
+
+	repl = kpm_receive(fd);
+	if (!repl) {
+		warnx("Failed to setup RX steering - no response");
+		return -1;
+	}
+
+	if (!kpm_good_reply(repl, KPM_MSG_TYPE_SETUP_RX_STEERING, id)) {
+		warnx("Failed to setup RX steering - bad reply");
+		free(repl);
+		return -1;
+	}
+
+	free(repl);
+	return 0;
+}
+
 int kpm_req_disconnect(int fd, __u32 connection_id)
 {
 	struct kpm_empty *repl;

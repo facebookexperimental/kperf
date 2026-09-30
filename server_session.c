@@ -49,6 +49,7 @@ struct session_state {
 	struct list_head connections;
 	struct list_head workers;
 	struct list_head tests;
+	struct rx_steering rx_steering;
 	struct session_state_devmem devmem;
 	struct session_state_iou iou_state;
 	struct ynl_sock *psp;
@@ -605,6 +606,42 @@ err_quit:
 }
 
 static void
+server_msg_setup_rx_steering(struct session_state *self,
+			     struct kpm_header *hdr)
+{
+	struct kpm_setup_rx_steering *req;
+	int ret;
+
+	if (hdr->len < sizeof(*req)) {
+		warn("Invalid request in %s", __func__);
+		goto err_quit;
+	}
+	req = (void *)hdr;
+
+	if (!self->tcp_sock) {
+		warnx("RX steering setup requires a TCP acceptor");
+		goto err_quit;
+	}
+
+	ret = rx_steering_setup(&self->rx_steering, self->tcp_sock,
+				req->num_queues);
+	if (ret < 0) {
+		warnx("Failed to setup RX steering");
+		goto err_quit;
+	}
+
+	if (kpm_reply_empty(self->main_sock, hdr) < 1) {
+		warnx("Reply failed");
+		goto err_quit;
+	}
+
+	return;
+
+err_quit:
+	self->quit = 1;
+}
+
+static void
 server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 {
 	struct kpm_mode *req;
@@ -617,8 +654,9 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	req = (void *)hdr;
 
 	if (self->tcp_sock && req->rx_mode == KPM_RX_MODE_DEVMEM) {
-		ret = devmem_setup(&self->devmem, self->tcp_sock, req->dmabuf_rx_size_mb,
-				   req->num_rx_queues, req->rx_page_size,
+		ret = devmem_setup(&self->devmem, &self->rx_steering,
+				   req->dmabuf_rx_size_mb, req->num_rx_queues,
+				   req->rx_page_size,
 				   req->rx_provider, &req->dev);
 		if (ret < 0) {
 			warnx("Failed to setup devmem");
@@ -984,6 +1022,9 @@ static void session_handle_main_sock(struct session_state *self)
 	case KPM_MSG_TYPE_MODE:
 		server_msg_mode(self, hdr);
 		break;
+	case KPM_MSG_TYPE_SETUP_RX_STEERING:
+		server_msg_setup_rx_steering(self, hdr);
+		break;
 	case KPM_MSG_TYPE_SPAWN_WORKER:
 		server_msg_spawn_worker(self, hdr);
 		break;
@@ -1187,6 +1228,7 @@ static void server_session_loop(int fd)
 		devmem_teardown(&self.devmem);
 	if (!self.tcp_sock && self.tx_mode == KPM_TX_MODE_DEVMEM)
 		devmem_teardown_tx(&self.devmem);
+	rx_steering_teardown(&self.rx_steering);
 	if (self.tcp_sock && self.iou && self.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
 		iou_zerocopy_rx_teardown(&self.iou_state);
 
