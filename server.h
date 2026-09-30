@@ -106,10 +106,6 @@ struct worker_state_devmem {
 
 struct session_state_iou {
 	unsigned int rx_size_mb;
-	char ifname[IFNAMSIZ];
-	int ifindex;
-	int rss_context;
-	int queue_id;
 };
 
 struct worker_state_iou {

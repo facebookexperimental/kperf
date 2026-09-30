@@ -18,10 +18,6 @@ struct rx_steering {
 
 int rx_steering_find_iface(struct sockaddr_in6 *addr,
 			   char ifname[IFNAMSIZ]);
-int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
-		   int *out_ifindex, int *out_queue_id, int *out_rss_context);
-void unreserve_queues(char *ifname, int rss_context);
-
 int rx_steering_setup(struct rx_steering *steering, int fd, int num_queues);
 void rx_steering_teardown(struct rx_steering *steering);
 
