@@ -89,6 +89,11 @@ TCP autocorking may still delay a request until the previous one left the
 host, set ``net.ipv4.tcp_autocorking=0`` to avoid that.  Open loop is not
 supported with io_uring yet.
 
+With ``--out-csv`` RR tests add the achieved request rate of all
+connections, and open loop also the target, requests sent and the max in
+flight of any connection.  Fields the side receiving requests does not
+measure in open loop are left empty.
+
 Contributing
 ------------
 
