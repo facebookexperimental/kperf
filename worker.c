@@ -325,10 +325,10 @@ void worker_handle_proto(struct worker_state *self, struct kpm_header *hdr)
 static void
 worker_record_rr_time(struct worker_state *self, struct worker_connection *conn)
 {
-	struct timerel delta;
 	struct timemono now;
 	unsigned int lat;
 	int hist_idx;
+	__u64 nsec;
 
 	if (!conn->spec->arg.rr.timings)
 		return;
@@ -337,10 +337,8 @@ worker_record_rr_time(struct worker_state *self, struct worker_connection *conn)
 	if (!self->prev_loop.ts.tv_sec)
 		goto out_update;
 
-	delta = timemono_between(now, self->prev_loop);
-	lat = delta.ts.tv_nsec / KPM_LAT_UNIT_NS;
-	if (delta.ts.tv_sec)
-		lat = ~0U;
+	nsec = time_to_nsec(timemono_between(now, self->prev_loop));
+	lat = nsec / KPM_LAT_UNIT_NS > ~0U ? ~0U : nsec / KPM_LAT_UNIT_NS;
 
 	if (conn->spec->arg.rr.timings > 1 &&
 	    conn->rr.log_len < conn->rr.log_len_max)

@@ -499,6 +499,11 @@ show_cpu_stat(const char *pfx, struct kpm_test_results *result, unsigned int id)
 	      cpu->sirq / 100.0);
 }
 
+static unsigned long long lat_us(unsigned long long lat)
+{
+	return lat * KPM_LAT_UNIT_NS / 1000;
+}
+
 static void
 dump_result(struct kpm_test_results *result,
 	    struct kpm_connect_reply *conns, bool local)
@@ -585,13 +590,13 @@ dump_result(struct kpm_test_results *result,
 		return;
 
 	for (r = 0; r < opt.n_conns; r++)
-		warnx("p25:%uus p50:%uus p90:%uus p99:%uus p999:%uus p9999:%uus",
-		      result->res[r].p25 * KPM_LAT_UNIT_NS / 1000,
-		      result->res[r].p50 * KPM_LAT_UNIT_NS / 1000,
-		      result->res[r].p90 * KPM_LAT_UNIT_NS / 1000,
-		      result->res[r].p99 * KPM_LAT_UNIT_NS / 1000,
-		      result->res[r].p999 * KPM_LAT_UNIT_NS / 1000,
-		      result->res[r].p9999 * KPM_LAT_UNIT_NS / 1000);
+		warnx("p25:%lluus p50:%lluus p90:%lluus p99:%lluus p999:%lluus p9999:%lluus",
+		      lat_us(result->res[r].p25),
+		      lat_us(result->res[r].p50),
+		      lat_us(result->res[r].p90),
+		      lat_us(result->res[r].p99),
+		      lat_us(result->res[r].p999),
+		      lat_us(result->res[r].p9999));
 }
 
 static void
@@ -671,13 +676,10 @@ dump_result_machine(struct kpm_test_results *result,
 	       res.rtt, res.rttvar, res.snd_wnd, res.snd_cwnd);
 
 	if (opt.time_stats >= 2)
-		printf("%u,%u,%u,%u,%u,%u,",
-		       res.p25 * KPM_LAT_UNIT_NS / 1000,
-		       res.p50 * KPM_LAT_UNIT_NS / 1000,
-		       res.p90 * KPM_LAT_UNIT_NS / 1000,
-		       res.p99 * KPM_LAT_UNIT_NS / 1000,
-		       res.p999 * KPM_LAT_UNIT_NS / 1000,
-		       res.p9999 * KPM_LAT_UNIT_NS / 1000);
+		printf("%llu,%llu,%llu,%llu,%llu,%llu,",
+		       lat_us(res.p25), lat_us(res.p50),
+		       lat_us(res.p90), lat_us(res.p99),
+		       lat_us(res.p999), lat_us(res.p9999));
 
 	/* Dunno how to report CPU use, yet */
 	if (opt.n_conns < 2) {
