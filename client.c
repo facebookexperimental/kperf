@@ -615,6 +615,8 @@ dump_result_machine(struct kpm_test_results *result,
 		    struct kpm_connect_reply *conns, bool local)
 {
 	struct kpm_test_result res = {};
+	unsigned int inflight_max = 0;
+	bool rr = opt.req_size != ~0U;
 	struct kpm_cpu_load *cpu;
 	unsigned int r;
 	int flow_cpu;
@@ -622,10 +624,13 @@ dump_result_machine(struct kpm_test_results *result,
 	int i;
 
 	for (r = 0; r < opt.n_conns; r++) {
+		inflight_max = max(inflight_max,
+				   result->res[r].rr_inflight_max);
 #define S(f) res.f += result->res[r].f;
 		S(rx_bytes);
 		S(tx_bytes);
 		S(reqs);
+		S(rr_sent);
 		S(retrans);
 		S(reord_seen);
 		S(rtt);
@@ -662,6 +667,8 @@ dump_result_machine(struct kpm_test_results *result,
 			printf("tcp,,,,,,,");
 			if (opt.time_stats >= 2)
 				printf("latency,(us),,,,,");
+			if (rr)
+				printf(opt.rps ? "rr,,,," : "rr,");
 			if (opt.n_conns < 2) {
 				printf("net,,,,");
 				if (opt.pin_off)
@@ -673,6 +680,9 @@ dump_result_machine(struct kpm_test_results *result,
 			printf("retrans,reord,ce,rtt,rttvar,swnd,cwnd,");
 			if (opt.time_stats >= 2)
 				printf("p25,p50,p90,p99,p999,p9999,");
+			if (rr)
+				printf(opt.rps ? "rps,target,sent,max_inflight," :
+				       "rps,");
 			if (opt.n_conns < 2) {
 				printf("usr,sys,idle,sirq,");
 				if (opt.pin_off)
@@ -686,11 +696,24 @@ dump_result_machine(struct kpm_test_results *result,
 	       res.retrans, res.reord_seen, res.delivered_ce,
 	       res.rtt, res.rttvar, res.snd_wnd, res.snd_cwnd);
 
-	if (opt.time_stats >= 2)
+	/* Open loop latency is measured only by the requesting side */
+	if (opt.time_stats >= 2 && opt.rps && !local)
+		printf(",,,,,,");
+	else if (opt.time_stats >= 2)
 		printf("%llu,%llu,%llu,%llu,%llu,%llu,",
 		       lat_us(res.p25), lat_us(res.p50),
 		       lat_us(res.p90), lat_us(res.p99),
 		       lat_us(res.p999), lat_us(res.p9999));
+
+	if (rr)
+		printf("%.1lf,", res.reqs * 1000000.0 / result->time_usec);
+	if (rr && opt.rps) {
+		printf("%u,", opt.rps * opt.n_conns);
+		if (local)
+			printf("%u,%u,", res.rr_sent, inflight_max);
+		else
+			printf(",,");
+	}
 
 	/* Dunno how to report CPU use, yet */
 	if (opt.n_conns < 2) {
