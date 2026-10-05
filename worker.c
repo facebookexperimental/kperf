@@ -37,7 +37,7 @@ worker_kill_conn(struct worker_state *self, struct worker_connection *conn)
 static int
 worker_pstat_cmp(unsigned int const *a, unsigned int const *b, void *unused)
 {
-	return (long long int)*a - (long long int)*b;
+	return *a < *b ? -1 : *a > *b;
 }
 
 static void
