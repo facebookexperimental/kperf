@@ -20,6 +20,7 @@
 
 #include <ccan/array_size/array_size.h>
 #include <ccan/err/err.h>
+#include <ccan/minmax/minmax.h>
 
 #include <ynl-c/netdev.h>
 
@@ -764,7 +765,8 @@ int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_ty
 		return -1;
 	}
 
-	txmp->memcpy_to_device(devmem->tx_mem, 0, patbuf, sizeof(patbuf));
+	txmp->memcpy_to_device(devmem->tx_mem, 0, patbuf,
+			       min(sizeof(patbuf), devmem->tx_mem->size));
 
 	ifindex = rx_steering_find_iface(&devmem->addr, ifname);
 	if (ifindex < 0) {
