@@ -158,7 +158,8 @@ ep_send_disarm(struct worker_state *self, struct worker_connection *conn,
 		warn("Failed to modify poll out");
 }
 
-static void
+/* 1: reaped one, 0: none queued, -1: the connection was killed */
+static int
 ep_handle_completions(struct worker_state *self, struct worker_connection *conn,
 		      unsigned int events)
 {
@@ -174,7 +175,7 @@ ep_handle_completions(struct worker_state *self, struct worker_connection *conn,
 	ret = recvmsg(conn->fd, &msg, MSG_ERRQUEUE);
 	if (ret < 0) {
 		if (errno == EAGAIN)
-			return;
+			return 0;
 		warn("failed to clean completions");
 		goto kill_conn;
 	}
@@ -218,10 +219,22 @@ ep_handle_completions(struct worker_state *self, struct worker_connection *conn,
 	kpm_dbg("send complete (%d..%d) %d\n",
 		serr->ee_data, serr->ee_info + 1, conn->to_send_comp);
 
-	return;
+	return 1;
 
 kill_conn:
 	worker_kill_conn(self, conn);
+	return -1;
+}
+
+static bool
+ep_reap_completions(struct worker_state *self, struct worker_connection *conn,
+		    unsigned int events)
+{
+	int ret;
+
+	while ((ret = ep_handle_completions(self, conn, events)) > 0)
+		;
+	return !ret;
 }
 
 static bool
@@ -437,7 +450,7 @@ ep_handle_conn(struct worker_state *self, int fd, unsigned int events)
 		}
 	}
 	if (events & EPOLLERR)
-		ep_handle_completions(self, conn, events);
+		ep_reap_completions(self, conn, events);
 
 	if (!(events & (EPOLLOUT | EPOLLIN | EPOLLERR)))
 		warnx("Connection has nothing to do %x", events);
