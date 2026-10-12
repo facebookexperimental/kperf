@@ -67,6 +67,28 @@ process), adding threads should not be a problem but was not needed, so far::
                        '---------' |     | '---------'
                                    |     |
 
+Request/response tests
+----------------------
+
+``--req-size`` (and optionally ``--resp-size``) switches from a stream to
+request/response (RR) traffic.  ``--time-stats 1`` adds a latency
+histogram, ``--time-stats 2`` also percentiles.
+
+By default RR is closed loop: one request in flight per connection, the
+next one is sent when the response arrives, so the request rate is as high
+as the round trip allows, and latency is the time between requests.
+
+``--rps <N>`` makes RR open loop: each connection sends a request every
+1/N sec, without waiting for responses.  Latency is measured by the side
+sending requests, from when a request was due to when its response arrived,
+so it includes the time the sender fell behind.  The results show the
+achieved request rate, requests sent and the max number in flight.
+Requests still in flight at the end of the test are not counted.  Open
+loop sets ``TCP_NODELAY``, Nagle would hold requests behind unacked ones.
+TCP autocorking may still delay a request until the previous one left the
+host, set ``net.ipv4.tcp_autocorking=0`` to avoid that.  Open loop is not
+supported with io_uring yet.
+
 Contributing
 ------------
 

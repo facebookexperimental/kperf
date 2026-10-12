@@ -59,6 +59,18 @@ struct worker_connection {
 			unsigned int log_len;
 			unsigned int log_len_max;
 			unsigned int *log;
+
+			/* Open loop, spec->arg.rr.rps as spec is freed early */
+			unsigned int rps;
+			__u64 start_ns;
+			__u64 next_ns;
+			unsigned int sent;
+			unsigned int inflight_max;
+			/* FIFO of due times of the requests in flight */
+			__u64 *sched;
+			unsigned int sched_size;	/* power of 2 */
+			unsigned int sched_head;
+			unsigned int sched_tail;
 		} rr;
 	};
 	struct list_node connections;
@@ -70,6 +82,8 @@ struct io_ops {
 	void (*wait)(struct worker_state *state, __s64 nsec);
 	void (*conn_add)(struct worker_state *state, struct worker_connection *conn);
 	void (*conn_close)(struct worker_state *state, struct worker_connection *conn);
+	/* Start sending @conn->to_send, nothing being sent; false if killed */
+	bool (*kick_send)(struct worker_state *state, struct worker_connection *conn);
 	void (*exit)(struct worker_state *state);
 };
 
@@ -79,5 +93,10 @@ void worker_send_finished(struct worker_state *self, struct worker_connection *c
 bool worker_recv_finished(struct worker_state *self, struct worker_connection *conn);
 bool worker_recv_progress(struct worker_state *self,
 			  struct worker_connection *conn, size_t n);
+
+static inline bool worker_rr_open_loop(struct worker_connection *conn)
+{
+	return conn->rr.rps;
+}
 
 #endif /* WORKER_H */
