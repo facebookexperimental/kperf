@@ -242,6 +242,9 @@ struct kpm_test {
 	} specs[0];
 };
 
+/* The unit of the RR latencies in the results */
+#define KPM_LAT_UNIT_NS		128
+
 struct kpm_test_results {
 	struct kpm_header hdr;
 	__u32 time_usec;

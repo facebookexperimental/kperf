@@ -326,8 +326,8 @@ static void
 worker_record_rr_time(struct worker_state *self, struct worker_connection *conn)
 {
 	struct timerel delta;
-	unsigned int nsec128;
 	struct timemono now;
+	unsigned int lat;
 	int hist_idx;
 
 	if (!conn->spec->arg.rr.timings)
@@ -338,17 +338,17 @@ worker_record_rr_time(struct worker_state *self, struct worker_connection *conn)
 		goto out_update;
 
 	delta = timemono_between(now, self->prev_loop);
-	nsec128 = delta.ts.tv_nsec / 128;
+	lat = delta.ts.tv_nsec / KPM_LAT_UNIT_NS;
 	if (delta.ts.tv_sec)
-		nsec128 = ~0U;
+		lat = ~0U;
 
 	if (conn->spec->arg.rr.timings > 1 &&
 	    conn->rr.log_len < conn->rr.log_len_max)
-		conn->rr.log[conn->rr.log_len++] = nsec128;
+		conn->rr.log[conn->rr.log_len++] = lat;
 
 	hist_idx = 0;
-	while (nsec128) {
-		nsec128 >>= 1;
+	while (lat) {
+		lat >>= 1;
 		hist_idx++;
 	}
 	conn->rr.hist[hist_idx]++;

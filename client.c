@@ -567,13 +567,13 @@ dump_result(struct kpm_test_results *result,
 			const char *unit;
 
 			if (i < 3) {
-				val = 128 << i;
+				val = KPM_LAT_UNIT_NS << i;
 				unit = "ns";
 			} else if (i < 13) {
-				val = (1ULL << (i + 7)) / 1000;
+				val = (1ULL << i) * KPM_LAT_UNIT_NS / 1000;
 				unit = "us";
 			} else {
-				val = (1ULL << (i + 7)) / (1000 * 1000);
+				val = (1ULL << i) * KPM_LAT_UNIT_NS / (1000 * 1000);
 				unit = "ms";
 			}
 			warnx("  [%3d%s] %d",
@@ -586,12 +586,12 @@ dump_result(struct kpm_test_results *result,
 
 	for (r = 0; r < opt.n_conns; r++)
 		warnx("p25:%uus p50:%uus p90:%uus p99:%uus p999:%uus p9999:%uus",
-		      result->res[r].p25 * 128 / 1000,
-		      result->res[r].p50 * 128 / 1000,
-		      result->res[r].p90 * 128 / 1000,
-		      result->res[r].p99 * 128 / 1000,
-		      result->res[r].p999 * 128 / 1000,
-		      result->res[r].p9999 * 128 / 1000);
+		      result->res[r].p25 * KPM_LAT_UNIT_NS / 1000,
+		      result->res[r].p50 * KPM_LAT_UNIT_NS / 1000,
+		      result->res[r].p90 * KPM_LAT_UNIT_NS / 1000,
+		      result->res[r].p99 * KPM_LAT_UNIT_NS / 1000,
+		      result->res[r].p999 * KPM_LAT_UNIT_NS / 1000,
+		      result->res[r].p9999 * KPM_LAT_UNIT_NS / 1000);
 }
 
 static void
@@ -672,9 +672,12 @@ dump_result_machine(struct kpm_test_results *result,
 
 	if (opt.time_stats >= 2)
 		printf("%u,%u,%u,%u,%u,%u,",
-		       res.p25 * 128 / 1000, res.p50 * 128 / 1000,
-		       res.p90 * 128 / 1000, res.p99 * 128 / 1000,
-		       res.p999 * 128 / 1000, res.p9999 * 128 / 1000);
+		       res.p25 * KPM_LAT_UNIT_NS / 1000,
+		       res.p50 * KPM_LAT_UNIT_NS / 1000,
+		       res.p90 * KPM_LAT_UNIT_NS / 1000,
+		       res.p99 * KPM_LAT_UNIT_NS / 1000,
+		       res.p999 * KPM_LAT_UNIT_NS / 1000,
+		       res.p9999 * KPM_LAT_UNIT_NS / 1000);
 
 	/* Dunno how to report CPU use, yet */
 	if (opt.n_conns < 2) {
