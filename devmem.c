@@ -446,7 +446,8 @@ int devmem_setup(struct session_state_devmem *devmem,
 		goto undo_queues;
 	}
 
-	devmem->ys = ynl_sock_create(&ynl_netdev_family, &yerr);
+	if (!devmem->ys)
+		devmem->ys = ynl_sock_create(&ynl_netdev_family, &yerr);
 	if (!devmem->ys) {
 		warnx("Failed to setup YNL socket: %s", yerr.msg);
 		ret = -1;
@@ -774,7 +775,8 @@ int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_ty
 		return -1;
 	}
 
-	devmem->ys = ynl_sock_create(&ynl_netdev_family, &yerr);
+	if (!devmem->ys)
+		devmem->ys = ynl_sock_create(&ynl_netdev_family, &yerr);
 	if (!devmem->ys) {
 		warnx("Failed to setup YNL socket: %s", yerr.msg);
 		return -1;
