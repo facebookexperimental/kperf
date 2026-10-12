@@ -63,6 +63,26 @@ worker_report_pstats(struct worker_state *self, struct worker_connection *conn,
 	data->p9999 = conn->rr.log[(__u64)conn->rr.log_len * 9999 / 10000];
 }
 
+static void
+worker_record_lat(struct worker_connection *conn, __u64 nsec)
+{
+	unsigned int lat;
+	int hist_idx;
+
+	lat = nsec / KPM_LAT_UNIT_NS > ~0U ? ~0U : nsec / KPM_LAT_UNIT_NS;
+
+	if (conn->spec->arg.rr.timings > 1 &&
+	    conn->rr.log_len < conn->rr.log_len_max)
+		conn->rr.log[conn->rr.log_len++] = lat;
+
+	hist_idx = 0;
+	while (lat) {
+		lat >>= 1;
+		hist_idx++;
+	}
+	conn->rr.hist[hist_idx]++;
+}
+
 /* == Worker command handling == */
 
 static void worker_report_test(struct worker_state *self)
@@ -333,32 +353,14 @@ static void
 worker_record_rr_time(struct worker_state *self, struct worker_connection *conn)
 {
 	struct timemono now;
-	unsigned int lat;
-	int hist_idx;
-	__u64 nsec;
 
 	if (!conn->spec->arg.rr.timings)
 		return;
 
 	now = time_mono();
-	if (!self->prev_loop.ts.tv_sec)
-		goto out_update;
-
-	nsec = time_to_nsec(timemono_between(now, self->prev_loop));
-	lat = nsec / KPM_LAT_UNIT_NS > ~0U ? ~0U : nsec / KPM_LAT_UNIT_NS;
-
-	if (conn->spec->arg.rr.timings > 1 &&
-	    conn->rr.log_len < conn->rr.log_len_max)
-		conn->rr.log[conn->rr.log_len++] = lat;
-
-	hist_idx = 0;
-	while (lat) {
-		lat >>= 1;
-		hist_idx++;
-	}
-	conn->rr.hist[hist_idx]++;
-
-out_update:
+	if (self->prev_loop.ts.tv_sec)
+		worker_record_lat(conn, time_to_nsec(timemono_between(now,
+								 self->prev_loop)));
 	self->prev_loop = now;
 }
 
