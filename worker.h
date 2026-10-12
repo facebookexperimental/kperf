@@ -66,7 +66,8 @@ struct worker_connection {
 
 struct io_ops {
 	void (*prep)(struct worker_state *state);
-	void (*wait)(struct worker_state *state, int msec);
+	/* @nsec < 0 waits until an event */
+	void (*wait)(struct worker_state *state, __s64 nsec);
 	void (*conn_add)(struct worker_state *state, struct worker_connection *conn);
 	void (*conn_close)(struct worker_state *state, struct worker_connection *conn);
 	void (*exit)(struct worker_state *state);
