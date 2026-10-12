@@ -146,6 +146,7 @@ static void worker_report_test(struct worker_state *self)
 
 		/* Shut down sending to let the connection drain */
 		conn->to_send = 0;
+		conn->compl_wait = false;
 	}
 skip_results:
 

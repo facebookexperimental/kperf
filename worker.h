@@ -37,6 +37,8 @@ struct worker_connection {
 	unsigned int write_size;
 	__u64 to_send;
 	__u64 to_send_comp;
+	bool compl_wait;
+	bool rx_parked;
 	__u64 to_recv;
 	__u64 tot_sent;
 	__u64 tot_recv;
