@@ -610,6 +610,8 @@ server_msg_setup_rx_steering(struct session_state *self,
 			     struct kpm_header *hdr)
 {
 	struct kpm_setup_rx_steering *req;
+	struct sockaddr_in6 addr;
+	socklen_t len;
 	int ret;
 
 	if (hdr->len < sizeof(*req)) {
@@ -618,12 +620,21 @@ server_msg_setup_rx_steering(struct session_state *self,
 	}
 	req = (void *)hdr;
 
-	if (!self->tcp_sock) {
-		warnx("RX steering setup requires a TCP acceptor");
+	if (self->tcp_sock) {
+		len = sizeof(addr);
+		if (getsockname(self->tcp_sock, (void *)&addr, &len)) {
+			warn("Failed to query the TCP acceptor's address");
+			goto err_quit;
+		}
+	} else if (req->peer_port) {
+		addr = req->addr;
+	} else {
+		warnx("RX steering setup requires a TCP acceptor, or the peer port");
 		goto err_quit;
 	}
 
-	ret = rx_steering_setup(&self->rx_steering, self->tcp_sock,
+	ret = rx_steering_setup(&self->rx_steering, &addr,
+				self->tcp_sock ? 0 : req->peer_port,
 				req->num_queues);
 	if (ret < 0) {
 		warnx("Failed to setup RX steering");

@@ -534,14 +534,18 @@ kpm_req_mode(int fd, struct kpm_mode *mode)
 	return 0;
 }
 
-int kpm_req_setup_rx_steering(int fd, __u32 num_queues)
+int kpm_req_setup_rx_steering(int fd, __u32 num_queues,
+			      const struct sockaddr_in6 *addr, __u16 peer_port)
 {
 	struct kpm_setup_rx_steering msg = {
 		.num_queues = num_queues,
+		.peer_port = peer_port,
 	};
 	struct kpm_empty *repl;
 	int id;
 
+	if (addr)
+		msg.addr = *addr;
 	id = kpm_send(fd, &msg.hdr, sizeof(msg),
 		      KPM_MSG_TYPE_SETUP_RX_STEERING);
 	if (id < 0) {

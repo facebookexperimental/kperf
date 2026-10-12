@@ -96,7 +96,7 @@ free_rules:
 	return -1;
 }
 
-static int add_steering_rule(struct sockaddr_in6 *server_sin,
+static int add_steering_rule(struct sockaddr_in6 *server_sin, __u16 peer_port,
 			     const char *ifname, int rss_context)
 {
 	struct ethtool_rxnfc add = {};
@@ -108,25 +108,31 @@ static int add_steering_rule(struct sockaddr_in6 *server_sin,
 
 	if (IN6_IS_ADDR_V4MAPPED(&server_sin->sin6_addr)) {
 		add.fs.flow_type = TCP_V4_FLOW;
-                memcpy(&add.fs.h_u.tcp_ip4_spec.ip4dst,
-                       &server_sin->sin6_addr.s6_addr32[3], 4);
-                memcpy(&add.fs.h_u.tcp_ip4_spec.pdst,
-		       &server_sin->sin6_port, 2);
-
+		memcpy(&add.fs.h_u.tcp_ip4_spec.ip4dst,
+		       &server_sin->sin6_addr.s6_addr32[3], 4);
 		add.fs.m_u.tcp_ip4_spec.ip4dst = 0xffffffff;
-		add.fs.m_u.tcp_ip4_spec.pdst = 0xffff;
+		if (peer_port) {
+			add.fs.h_u.tcp_ip4_spec.psrc = peer_port;
+			add.fs.m_u.tcp_ip4_spec.psrc = 0xffff;
+		} else {
+			add.fs.h_u.tcp_ip4_spec.pdst = server_sin->sin6_port;
+			add.fs.m_u.tcp_ip4_spec.pdst = 0xffff;
+		}
 	} else {
 		add.fs.flow_type = TCP_V6_FLOW;
-                memcpy(add.fs.h_u.tcp_ip6_spec.ip6dst, &server_sin->sin6_addr,
-                       16);
-                memcpy(&add.fs.h_u.tcp_ip6_spec.pdst, &server_sin->sin6_port,
-                       2);
-
-                add.fs.m_u.tcp_ip6_spec.ip6dst[0] = 0xffffffff;
+		memcpy(add.fs.h_u.tcp_ip6_spec.ip6dst, &server_sin->sin6_addr,
+		       16);
+		add.fs.m_u.tcp_ip6_spec.ip6dst[0] = 0xffffffff;
 		add.fs.m_u.tcp_ip6_spec.ip6dst[1] = 0xffffffff;
 		add.fs.m_u.tcp_ip6_spec.ip6dst[2] = 0xffffffff;
 		add.fs.m_u.tcp_ip6_spec.ip6dst[3] = 0xffffffff;
-		add.fs.m_u.tcp_ip6_spec.pdst = 0xffff;
+		if (peer_port) {
+			add.fs.h_u.tcp_ip6_spec.psrc = peer_port;
+			add.fs.m_u.tcp_ip6_spec.psrc = 0xffff;
+		} else {
+			add.fs.h_u.tcp_ip6_spec.pdst = server_sin->sin6_port;
+			add.fs.m_u.tcp_ip6_spec.pdst = 0xffff;
+		}
 	}
 
 	add.fs.flow_type |= FLOW_RSS;
@@ -173,7 +179,7 @@ static int rss_context_delete(char *ifname, int rss_context)
 }
 
 static int rss_context_equal(char *ifname, int start_queue, int num_queues,
-			     struct sockaddr_in6 *addr)
+			     struct sockaddr_in6 *addr, __u16 peer_port)
 {
 	struct ethtool_rxfh get = {};
 	struct ethtool_rxfh *set;
@@ -215,7 +221,7 @@ static int rss_context_equal(char *ifname, int start_queue, int num_queues,
 
 	rss_context = set->rss_context;
 
-	if (add_steering_rule(addr, ifname, rss_context) < 0) {
+	if (add_steering_rule(addr, peer_port, ifname, rss_context) < 0) {
 		warn("Failed to add rule to RSS context");
 		ret = -1;
 		goto delete_context;
@@ -332,14 +338,14 @@ int rx_steering_find_iface(struct sockaddr_in6 *addr, char ifname[IFNAMSIZ])
 	return -ENODEV;
 }
 
-static int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
+static int reserve_queues(const struct sockaddr_in6 *local, __u16 peer_port,
+			  int num_queues, char out_ifname[IFNAMSIZ],
 			  int *out_ifindex, int *out_queue_id,
 			  int *out_rss_context)
 {
-	struct sockaddr_in6 addr;
+	struct sockaddr_in6 addr = *local;
 	char ifname[IFNAMSIZ];
 	int max_kernel_queue;
-	socklen_t optlen;
 	int rss_context;
 	int ifindex;
 	int ret = 0;
@@ -347,12 +353,6 @@ static int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
 
 	if (num_queues <= 0) {
 		warnx("Invalid number of RX queues: %u", num_queues);
-		return -1;
-	}
-
-	optlen = sizeof(addr);
-	if (getsockname(fd, (struct sockaddr *)&addr, &optlen) < 0) {
-		warn("Failed to query socket address");
 		return -1;
 	}
 
@@ -386,7 +386,7 @@ static int reserve_queues(int fd, int num_queues, char out_ifname[IFNAMSIZ],
 	}
 
 	rss_context = rss_context_equal(ifname, max_kernel_queue,
-					num_queues, &addr);
+					num_queues, &addr, peer_port);
 	if (rss_context < 0) {
 		warnx("Failed to setup RSS context");
 		ret = -1;
@@ -421,11 +421,13 @@ static void unreserve_queues(char *ifname, int rss_context)
 	}
 }
 
-int rx_steering_setup(struct rx_steering *steering, int fd, int num_queues)
+int rx_steering_setup(struct rx_steering *steering,
+		      const struct sockaddr_in6 *local, __u16 peer_port,
+		      int num_queues)
 {
 	int ret;
 
-	ret = reserve_queues(fd, num_queues, steering->ifname,
+	ret = reserve_queues(local, peer_port, num_queues, steering->ifname,
 			     &steering->ifindex, &steering->queue_id,
 			     &steering->rss_context);
 	if (ret)

@@ -18,7 +18,9 @@ struct rx_steering {
 
 int rx_steering_find_iface(struct sockaddr_in6 *addr,
 			   char ifname[IFNAMSIZ]);
-int rx_steering_setup(struct rx_steering *steering, int fd, int num_queues);
+int rx_steering_setup(struct rx_steering *steering,
+		      const struct sockaddr_in6 *local, __u16 peer_port,
+		      int num_queues);
 void rx_steering_teardown(struct rx_steering *steering);
 
 #endif /* RX_STEERING_H */
