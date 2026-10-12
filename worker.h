@@ -76,6 +76,8 @@ struct io_ops {
 void worker_handle_proto(struct worker_state *self, struct kpm_header *hdr);
 void worker_kill_conn(struct worker_state *self, struct worker_connection *conn);
 void worker_send_finished(struct worker_state *self, struct worker_connection *conn);
-void worker_recv_finished(struct worker_state *self, struct worker_connection *conn);
+bool worker_recv_finished(struct worker_state *self, struct worker_connection *conn);
+bool worker_recv_progress(struct worker_state *self,
+			  struct worker_connection *conn, size_t n);
 
 #endif /* WORKER_H */
