@@ -882,8 +882,8 @@ int main(int argc, char *argv[])
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
 	};
 	/*
-	 * Set up the final destination RSS context before creating connections
-	 * so the bipartite matching observes the CPUs used by the test.
+	 * Set up the final RSS contexts before creating connections so the
+	 * bipartite matching observes the CPUs used by the test.
 	 */
 	if (dst_mode.rx_mode == KPM_RX_MODE_DEVMEM ||
 	    (dst_mode.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY && dst_mode.iou)) {
@@ -892,6 +892,12 @@ int main(int argc, char *argv[])
 			warnx("Failed to setup destination RX steering");
 			goto out;
 		}
+	}
+	if (src_mode.rx_mode == KPM_RX_MODE_DEVMEM &&
+	    kpm_req_setup_rx_steering(src, src_mode.num_rx_queues, &src_addr,
+				      dst_addr.sin6_port) < 0) {
+		warnx("Failed to setup source RX steering");
+		goto out;
 	}
 
 	conns = spawn_conn(src, dst, &conn_addr, len);
