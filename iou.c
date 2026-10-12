@@ -505,7 +505,7 @@ err:
 	return;
 }
 
-static void iou_wait(struct worker_state *self, int msec)
+static void iou_wait(struct worker_state *self, __s64 nsec)
 {
 	struct io_uring *ring = get_ring(self);
 	struct __kernel_timespec timeout;
@@ -513,8 +513,8 @@ static void iou_wait(struct worker_state *self, int msec)
 	unsigned int count = 0;
 	unsigned int head;
 
-	timeout.tv_sec = msec / 1000;
-	timeout.tv_nsec = (msec % 1000) * 1000000;
+	timeout.tv_sec = nsec / 1000000000;
+	timeout.tv_nsec = nsec % 1000000000;
 
 	io_uring_submit_and_wait_timeout(ring, &cqe, 1, &timeout, NULL);
 

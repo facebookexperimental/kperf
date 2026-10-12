@@ -34,6 +34,13 @@ worker_kill_conn(struct worker_state *self, struct worker_connection *conn)
 	free(conn);
 }
 
+#define NSEC_PER_SEC	1000000000ULL
+
+static __u64 worker_ns(struct timemono t)
+{
+	return t.ts.tv_sec * NSEC_PER_SEC + t.ts.tv_nsec;
+}
+
 static int
 worker_pstat_cmp(unsigned int const *a, unsigned int const *b, void *unused)
 {
@@ -406,19 +413,22 @@ void* worker_main(void* args)
 	self.ops->prep(&self);
 
 	while (!self.quit) {
-		int msec = -1;
+		__s64 nsec = -1;
 
 		/* Check if we should end the test if we initiated */
 		if (self.test && self.test->active) {
-			struct timerel t;
+			__u64 now, end;
 
-			t = timemono_since(self.test_start);
-			msec = self.test_len_msec - time_to_msec(t);
-			if (msec < 0)
+			now = worker_ns(time_mono());
+			end = worker_ns(self.test_start) +
+				self.test_len_msec * 1000000ULL;
+			if (now >= end)
 				worker_report_test(&self);
+			else
+				nsec = end - now;
 		}
 
-		self.ops->wait(&self, msec);
+		self.ops->wait(&self, nsec);
 	}
 
 	self.ops->exit(&self);

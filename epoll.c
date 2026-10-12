@@ -498,13 +498,19 @@ static void ep_prep(struct worker_state *self)
 		err(6, "Failed to init epoll");
 }
 
-static void ep_wait(struct worker_state *self, int msec)
+static void ep_wait(struct worker_state *self, __s64 nsec)
 {
+	struct timespec ts, *tsp = NULL;
 	struct epoll_event events[32];
 	int i, nfds;
 
-	nfds = epoll_wait(self->epollfd, events, ARRAY_SIZE(events),
-				msec);
+	if (nsec >= 0) {
+		ts.tv_sec = nsec / 1000000000;
+		ts.tv_nsec = nsec % 1000000000;
+		tsp = &ts;
+	}
+	nfds = epoll_pwait2(self->epollfd, events, ARRAY_SIZE(events),
+			    tsp, NULL);
 	if (nfds < 0)
 		err(7, "Failed to epoll");
 
