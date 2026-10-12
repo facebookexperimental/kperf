@@ -736,6 +736,7 @@ int main(int argc, char *argv[])
 	__u32 *src_wrk_id, *dst_wrk_id;
 	struct sockaddr_in6 conn_addr;
 	__u32 src_tst_id, dst_tst_id;
+	struct sockaddr_in6 dst_addr;
 	struct sockaddr_in6 src_addr;
 	socklen_t len, src_peer_len;
 	struct addrinfo *addr;
@@ -743,6 +744,7 @@ int main(int argc, char *argv[])
 	unsigned int i;
 	int src, dst;
 	size_t sz;
+	bool rr;
 
 	opt_register_table(opts, NULL);
 
@@ -840,10 +842,17 @@ int main(int argc, char *argv[])
 		warnx("Failed create TCP acceptor");
 		goto out;
 	}
+	if (sockaddr_to_inet6((void *)&conn_addr, len, &dst_addr) < 0) {
+		warnx("Unsupported TCP acceptor address family");
+		goto out;
+	}
 
+	/* RR uses devmem both ways, a stream from source to destination */
+	rr = opt.req_size != ~0U;
 	struct kpm_mode dst_mode = {
 		.rx_mode = rx_mode,
-		.tx_mode = tx_mode,
+		.tx_mode = tx_mode == KPM_TX_MODE_DEVMEM && !rr ?
+			   KPM_TX_MODE_SOCKET : tx_mode,
 		.rx_provider = opt.devmem_rx_memory,
 		.tx_provider = opt.devmem_tx_memory,
 		.dev = opt.devmem_dst_dev,
@@ -851,12 +860,14 @@ int main(int argc, char *argv[])
 		.dmabuf_tx_size_mb = opt.dmabuf_tx_size_mb,
 		.num_rx_queues = opt.num_rx_queues,
 		.rx_page_size = opt.rx_page_size,
+		.addr = dst_addr,
 		.validate = opt.validate,
 		.iou = opt.iou_dst,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
 	};
 	struct kpm_mode src_mode = {
-		.rx_mode = rx_mode,
+		.rx_mode = rx_mode == KPM_RX_MODE_DEVMEM && !rr ?
+			   KPM_RX_MODE_SOCKET : rx_mode,
 		.tx_mode = tx_mode,
 		.rx_provider = opt.devmem_rx_memory,
 		.tx_provider = opt.devmem_tx_memory,
@@ -870,11 +881,6 @@ int main(int argc, char *argv[])
 		.iou = opt.iou_src,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
 	};
-	if (kpm_req_mode(src, &src_mode) < 0) {
-		warnx("Failed setup source mode");
-		goto out;
-	}
-
 	/*
 	 * Set up the final destination RSS context before creating connections
 	 * so the bipartite matching observes the CPUs used by the test.
@@ -892,6 +898,11 @@ int main(int argc, char *argv[])
 	if (!conns)
 		goto out;
 
+	/* Bind devmem only after the connections' handshake */
+	if (kpm_req_mode(src, &src_mode) < 0) {
+		warnx("Failed setup source mode");
+		goto out_id;
+	}
 	if (kpm_req_mode(dst, &dst_mode) < 0) {
 		warnx("Failed setup destination mode");
 		goto out_id;
