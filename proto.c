@@ -14,10 +14,13 @@
 
 #include "proto.h"
 
+/* The flexible array members are not in the sizeof()s, add them separately */
 static const unsigned int proto_ver =
-	__KPM_MSG_TOTAL << 24 |
-	sizeof(struct kpm_test) << 16 |
-	sizeof(struct kpm_test_results);
+	(__KPM_MSG_TOTAL << 24 |
+	 sizeof(struct kpm_test) << 16 |
+	 sizeof(struct kpm_test_results)) ^
+	(sizeof(struct kpm_test_spec) << 8) ^
+	sizeof(struct kpm_test_result);
 
 void *kpm_msg_dup(struct kpm_header *hdr)
 {
