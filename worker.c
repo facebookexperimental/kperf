@@ -5,12 +5,14 @@
 
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/prctl.h>
 #include <sys/sysinfo.h>
 
 #include <ccan/array_size/array_size.h>
 #include <ccan/asort/asort.h>
 #include <ccan/err/err.h>
 #include <ccan/fdpass/fdpass.h>
+#include <ccan/minmax/minmax.h>
 
 #include "worker.h"
 #include "cpu_stat.h"
@@ -31,6 +33,7 @@ worker_kill_conn(struct worker_state *self, struct worker_connection *conn)
 	list_del(&conn->connections);
 	free(conn->rxbuf);
 	free(conn->rr.log);
+	free(conn->rr.sched);
 	free(conn);
 }
 
@@ -81,6 +84,135 @@ worker_record_lat(struct worker_connection *conn, __u64 nsec)
 		hist_idx++;
 	}
 	conn->rr.hist[hist_idx]++;
+}
+
+/* == Open loop RR ==
+ * Requests go out when due; each response completes the oldest one in
+ * flight, its latency counted from when the request was due.
+ */
+
+static void worker_rr_start(struct worker_state *self)
+{
+	struct worker_connection *conn;
+	bool open_loop = false;
+
+	list_for_each(&self->connections, conn, connections) {
+		if (!worker_rr_open_loop(conn))
+			continue;
+		conn->rr.start_ns = worker_ns(self->test_start);
+		conn->rr.next_ns = conn->rr.start_ns;
+		/* Due times of the requests in flight, doubled when full */
+		conn->rr.sched_size = 1024;
+		conn->rr.sched = calloc(conn->rr.sched_size,
+					sizeof(*conn->rr.sched));
+		if (!conn->rr.sched) {
+			warnx("No memory");
+			self->quit = 1;
+			return;
+		}
+		open_loop = true;
+	}
+
+	/* Default timer slack is 50us, requests would go out late */
+	if (open_loop && prctl(PR_SET_TIMERSLACK, 1UL))
+		warn("Failed to set timer slack");
+}
+
+static int worker_rr_sched_push(struct worker_connection *conn, __u64 due)
+{
+	unsigned int n = conn->rr.sched_tail - conn->rr.sched_head;
+
+	if (n == conn->rr.sched_size) {
+		unsigned int head = conn->rr.sched_head & (n - 1);
+		__u64 *sched;
+
+		/* A power of 2, indexed by masking */
+		sched = reallocarray(conn->rr.sched, n * 2, sizeof(*sched));
+		if (!sched)
+			return -1;
+		/* Move the entries which wrapped to the start after the rest */
+		memcpy(sched + n, sched, head * sizeof(*sched));
+		conn->rr.sched = sched;
+		conn->rr.sched_size = n * 2;
+		conn->rr.sched_head = head;
+		conn->rr.sched_tail = head + n;
+	}
+
+	conn->rr.sched[conn->rr.sched_tail++ & (conn->rr.sched_size - 1)] = due;
+	return 0;
+}
+
+static bool worker_rr_queue_send(struct worker_connection *conn, __u64 len)
+{
+	bool idle = !conn->to_send;
+
+	conn->to_send += len;
+	return idle;
+}
+
+/* Send the requests which are due, returns when the next one is */
+static __u64 worker_rr_tick(struct worker_state *self, __u64 now)
+{
+	struct worker_connection *conn, *next;
+	__u64 next_ns = ~0ULL;
+
+	list_for_each_safe(&self->connections, conn, next, connections) {
+		struct kpm_test_spec *spec = conn->spec;
+		__u64 n = 0;
+
+		if (!worker_rr_open_loop(conn))
+			continue;
+
+		while (conn->rr.next_ns <= now) {
+			if (worker_rr_sched_push(conn, conn->rr.next_ns)) {
+				warnx("No memory");
+				self->quit = 1;
+				return ~0ULL;
+			}
+			conn->rr.inflight_max = max(conn->rr.inflight_max,
+						    conn->rr.sched_tail -
+						    conn->rr.sched_head);
+			conn->rr.sent++;
+			/* Not accumulating the interval, it may be inexact */
+			conn->rr.next_ns = conn->rr.start_ns +
+				conn->rr.sent * NSEC_PER_SEC / spec->arg.rr.rps;
+			n++;
+		}
+
+		if (n) {
+			if (!conn->to_recv)
+				conn->to_recv = spec->arg.rr.resp_size;
+			if (worker_rr_queue_send(conn,
+						 n * spec->arg.rr.req_size) &&
+			    !self->ops->kick_send(self, conn))
+				continue; /* killed */
+		}
+
+		if (conn->rr.next_ns < next_ns)
+			next_ns = conn->rr.next_ns;
+	}
+
+	return next_ns;
+}
+
+static void
+worker_rr_response(struct worker_state *self, struct worker_connection *conn)
+{
+	__u64 due;
+
+	if (conn->rr.sched_tail == conn->rr.sched_head) {
+		warnx("Response without a request");
+		return;
+	}
+
+	due = conn->rr.sched[conn->rr.sched_head++ &
+			     (conn->rr.sched_size - 1)];
+	conn->rr.reqs++;
+	if (conn->spec->arg.rr.timings)
+		worker_record_lat(conn, worker_ns(time_mono()) - due);
+
+	if (conn->rr.sched_tail != conn->rr.sched_head)
+		conn->to_recv = conn->spec->arg.rr.resp_size;
 }
 
 /* == Worker command handling == */
@@ -151,8 +283,11 @@ static void worker_report_test(struct worker_state *self)
 		data->rx_bytes = conn->tot_recv;
 		data->tx_bytes = conn->tot_sent;
 
-		if (conn->spec->type == KPM_TEST_TYPE_RR)
+		if (conn->spec->type == KPM_TEST_TYPE_RR) {
 			data->reqs = conn->rr.reqs;
+			data->rr_sent = conn->rr.sent;
+			data->rr_inflight_max = conn->rr.inflight_max;
+		}
 
 		data->retrans	= info.tcpi_total_retrans -
 			conn->init_info.tcpi_total_retrans;
@@ -174,6 +309,16 @@ static void worker_report_test(struct worker_state *self)
 		/* Shut down sending to let the connection drain */
 		conn->to_send = 0;
 		conn->compl_wait = false;
+
+		/* Drop open loop requests in flight, drain their responses */
+		if (worker_rr_open_loop(conn) && self->test->active) {
+			__u64 inflight;
+
+			inflight = conn->rr.sched_tail - conn->rr.sched_head;
+			if (inflight)
+				conn->to_recv += (inflight - 1) *
+					conn->spec->arg.rr.resp_size;
+		}
 	}
 skip_results:
 
@@ -239,6 +384,19 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 			self->quit = 1;
 		}
 
+		if (conn->spec->type == KPM_TEST_TYPE_RR)
+			conn->rr.rps = conn->spec->arg.rr.rps;
+		if (worker_rr_open_loop(conn)) {
+			int one = 1;
+
+			/* Nagle would hold requests behind unacked ones */
+			if (setsockopt(conn->fd, IPPROTO_TCP, TCP_NODELAY,
+				       &one, sizeof(one))) {
+				warn("Failed to set TCP_NODELAY");
+				self->quit = 1;
+			}
+		}
+
 		if (conn->spec->arg.rr.timings > 1) {
 			/* Assume we can't do a round trip < 1us on avg */
 			conn->rr.log_len_max =
@@ -273,6 +431,9 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 			break;
 		case KPM_TEST_TYPE_RR:
 			len = conn->spec->arg.rr.req_size;
+			/* Open loop requests are sent on a timer */
+			if (req->active && conn->spec->arg.rr.rps)
+				len = 0;
 			break;
 		default:
 			warnx("Unknown test type");
@@ -290,8 +451,10 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 	self->cpu_start = cpu_stat_snapshot(0);
 	self->test_start = time_mono();
 	memset(&self->prev_loop, 0, sizeof(self->prev_loop));
-	if (self->test->active)
+	if (self->test->active) {
 		self->test_len_msec = req->time_sec * 1000;
+		worker_rr_start(self);
+	}
 }
 
 static void
@@ -367,6 +530,9 @@ worker_record_rr_time(struct worker_state *self, struct worker_connection *conn)
 void
 worker_send_finished(struct worker_state *self, struct worker_connection *conn)
 {
+	if (worker_rr_open_loop(conn))
+		return;
+
 	worker_record_rr_time(self, conn);
 
 	if (conn->spec->type != KPM_TEST_TYPE_RR)
@@ -388,6 +554,16 @@ worker_recv_finished(struct worker_state *self, struct worker_connection *conn)
 
 	if (conn->spec->type != KPM_TEST_TYPE_RR)
 		warnx("Done sending for non-RR test");
+
+	if (worker_rr_open_loop(conn)) {
+		if (self->test->active) {
+			worker_rr_response(self, conn);
+			return false;
+		}
+		conn->rr.reqs++;
+		conn->to_recv = conn->spec->arg.rr.req_size;
+		return worker_rr_queue_send(conn, conn->spec->arg.rr.resp_size);
+	}
 
 	if (self->test->active)
 		conn->to_send =	conn->spec->arg.rr.req_size;
@@ -450,15 +626,20 @@ void* worker_main(void* args)
 
 		/* Check if we should end the test if we initiated */
 		if (self.test && self.test->active) {
-			__u64 now, end;
+			__u64 now, end, next;
 
 			now = worker_ns(time_mono());
 			end = worker_ns(self.test_start) +
 				self.test_len_msec * 1000000ULL;
-			if (now >= end)
+			if (now >= end) {
 				worker_report_test(&self);
-			else
-				nsec = end - now;
+			} else {
+				next = worker_rr_tick(&self, now);
+				if (next > end)
+					next = end;
+				now = worker_ns(time_mono());
+				nsec = next > now ? next - now : 0;
+			}
 		}
 
 		self.ops->wait(&self, nsec);

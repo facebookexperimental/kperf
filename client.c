@@ -47,6 +47,7 @@ static struct {
 	unsigned int time_stats;
 	unsigned int req_size;
 	unsigned int resp_size;
+	unsigned int rps;
 	unsigned int read_size;
 	unsigned int write_size;
 	unsigned int pin_off;
@@ -212,6 +213,9 @@ static const struct opt_table opts[] = {
 		     &opt.req_size, "Request size"),
 	OPT_WITH_ARG("--resp-size <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.resp_size, "Response size"),
+	OPT_WITH_ARG("--rps <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.rps,
+		     "Open loop RR: requests per second per connection, 0 for closed loop"),
 	OPT_WITH_ARG("--read-size <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.read_size, "Buffer size for write/send syscall"),
 	OPT_WITH_ARG("--write-size <arg>", opt_set_uintval, opt_show_uintval,
@@ -551,12 +555,19 @@ dump_result(struct kpm_test_results *result,
 	if (opt.req_size == ~0U)
 		return;
 
-	for (r = 0; r < opt.n_conns; r++)
-		warnx("%.1lf RPS",
-		      (double)result->res[r].reqs /
-		      result->time_usec * 1000000);
+	for (r = 0; r < opt.n_conns; r++) {
+		double rps = result->res[r].reqs * 1000000.0 / result->time_usec;
 
-	if (opt.time_stats < 1)
+		if (opt.rps && local)
+			warnx("%.1lf RPS (target %u, sent %u, max in flight %u)",
+			      rps, opt.rps, result->res[r].rr_sent,
+			      result->res[r].rr_inflight_max);
+		else
+			warnx("%.1lf RPS", rps);
+	}
+
+	/* Open loop latency is measured only by the requesting side */
+	if (opt.time_stats < 1 || (opt.rps && !local))
 		return;
 
 	for (r = 0; r < opt.n_conns; r++) {
@@ -800,6 +811,11 @@ int main(int argc, char *argv[])
 	else if (opt.devmem_tx)
 		tx_mode = KPM_TX_MODE_DEVMEM;
 
+	if (opt.rps && opt.req_size == ~0U)
+		errx(1, "--rps needs --req-size");
+	if (opt.rps && (opt.iou_src || opt.iou_dst))
+		errx(1, "--rps is not supported with io_uring");
+
 	addr = net_client_lookup(opt.src, opt.src_svc, AF_UNSPEC, SOCK_STREAM);
 	if (!addr)
 		errx(1, "Failed to look up service to connect to");
@@ -987,6 +1003,7 @@ int main(int argc, char *argv[])
 			test->specs[i].arg.rr.req_size = opt.req_size;
 			test->specs[i].arg.rr.resp_size = opt.resp_size ?: opt.req_size;
 			test->specs[i].arg.rr.timings = opt.time_stats;
+			test->specs[i].arg.rr.rps = opt.rps;
 		}
 	}
 

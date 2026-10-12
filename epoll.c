@@ -254,7 +254,9 @@ static bool
 ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 	       unsigned int events)
 {
-	unsigned int rep = max_t(int, 10, conn->to_send / conn->write_size + 1);
+	/* An open loop backlog sent all at once would starve the rest */
+	unsigned int rep = worker_rr_open_loop(conn) ? 10 :
+		max_t(int, 10, conn->to_send / conn->write_size + 1);
 	bool msg_zerocopy = self->opts.tx_mode == KPM_TX_MODE_SOCKET_ZEROCOPY || self->opts.tx_mode == KPM_TX_MODE_DEVMEM;
 	int flags = msg_zerocopy ? MSG_ZEROCOPY : 0;
 
@@ -284,6 +286,16 @@ ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 				ep_send_arm(self, conn, events);
 				return true;
 			}
+			/* Open loop sends requests without waiting for the
+			 * responses, and their zerocopy completions can use up
+			 * the socket's memory for them: reap them, try again.
+			 */
+			if (errno == ENOBUFS && msg_zerocopy) {
+				if (!ep_reap_completions(self, conn, events))
+					return false;
+				ep_send_arm(self, conn, events);
+				return true;
+			}
 			warn("Send failed");
 			worker_kill_conn(self, conn);
 			return false;
@@ -303,7 +315,7 @@ ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 				conn->compl_wait = true;
 			else
 				worker_send_finished(self, conn);
-			break;
+			return true;
 		}
 
 		if (n != (ssize_t)chunk) {
@@ -313,7 +325,14 @@ ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 		}
 	}
 
+	ep_send_arm(self, conn, events);
 	return true;
+}
+
+static bool
+ep_start_send(struct worker_state *self, struct worker_connection *conn)
+{
+	return ep_handle_send(self, conn, 0);
 }
 
 static ssize_t
@@ -396,6 +415,9 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 		ssize_t n;
 
 		chunk = min_t(size_t, conn->read_size, conn->to_recv);
+		/* Open loop messages are pipelined, read ahead */
+		if (worker_rr_open_loop(conn))
+			chunk = conn->read_size;
 		if (self->opts.rx_mode == KPM_RX_MODE_DEVMEM)
 			n = devmem_recv(conn->fd, &conn->devmem,
 					conn->rxbuf, chunk, self->opts.devmem.mem,
@@ -420,10 +442,13 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 		}
 
 		if (worker_recv_progress(self, conn, n)) {
-			if (!ep_handle_send(self, conn, 0))
+			if (!ep_start_send(self, conn))
 				return false;
 			break;
 		}
+		/* Nothing more expected, open loop with none in flight */
+		if (!conn->to_recv)
+			break;
 
 		if (n != conn->read_size)
 			break;
@@ -528,6 +553,7 @@ static const struct io_ops epoll_io_ops = {
 	.wait		= ep_wait,
 	.conn_add	= ep_conn_add,
 	.conn_close	= ep_conn_close,
+	.kick_send	= ep_start_send,
 	.exit		= ep_exit,
 };
 

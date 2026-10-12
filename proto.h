@@ -241,6 +241,8 @@ struct kpm_test {
 				__u32 req_size;
 				__u32 resp_size;
 				__u8 timings;
+				/* Open loop: requests per second, 0 for closed loop */
+				__u32 rps;
 			} rr;
 		} arg;
 	} specs[0];
@@ -271,6 +273,9 @@ struct kpm_test_results {
 		__u64 tx_bytes;
 
 		__u32 reqs;
+		/* Open loop only, on the side sending requests */
+		__u32 rr_sent;
+		__u32 rr_inflight_max;
 
 		__u32 retrans;
 		__u32 reord_seen;
