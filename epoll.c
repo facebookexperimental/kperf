@@ -158,6 +158,19 @@ ep_send_disarm(struct worker_state *self, struct worker_connection *conn,
 		warn("Failed to modify poll out");
 }
 
+static void
+ep_recv_park(struct worker_state *self, struct worker_connection *conn,
+	     bool park)
+{
+	struct epoll_event ev = {};
+
+	ev.events = park ? 0 : EPOLLIN;
+	ev.data.fd = conn->fd;
+	if (epoll_ctl(self->epollfd, EPOLL_CTL_MOD, conn->fd, &ev) < 0)
+		warn("Failed to modify poll in");
+	conn->rx_parked = park;
+}
+
 /* 1: reaped one, 0: none queued, -1: the connection was killed */
 static int
 ep_handle_completions(struct worker_state *self, struct worker_connection *conn,
@@ -284,9 +297,12 @@ ep_handle_send(struct worker_state *self, struct worker_connection *conn,
 				conn->to_send_comp);
 		}
 
-		if (!conn->to_send && !conn->to_send_comp) {
+		if (!conn->to_send) {
 			ep_send_disarm(self, conn, events);
-			worker_send_finished(self, conn);
+			if (conn->to_send_comp)
+				conn->compl_wait = true;
+			else
+				worker_send_finished(self, conn);
 			break;
 		}
 
@@ -432,11 +448,21 @@ ep_handle_conn(struct worker_state *self, int fd, unsigned int events)
 	if (!conn)
 		return;
 
+	if (events & EPOLLERR) {
+		if (!ep_reap_completions(self, conn, events))
+			return;
+		if (conn->compl_wait && !conn->to_send_comp) {
+			conn->compl_wait = false;
+			worker_send_finished(self, conn);
+			if (conn->rx_parked)
+				ep_recv_park(self, conn, false);
+		}
+	}
 	if (events & EPOLLOUT) {
 		if (conn->to_send) {
 			if (!ep_handle_send(self, conn, events))
 				return;
-		} else if (!conn->to_send_comp) {
+		} else {
 			ep_send_disarm(self, conn, events);
 		}
 	}
@@ -444,13 +470,14 @@ ep_handle_conn(struct worker_state *self, int fd, unsigned int events)
 		if (conn->to_recv) {
 			if (!ep_handle_recv(self, conn))
 				return;
+		} else if (conn->compl_wait || !self->test) {
+			/* Came before the completions, or after the test */
+			ep_recv_park(self, conn, true);
 		} else if (!warnd_unexpected_pi) {
 			warnx("Unexpected POLLIN %x", events);
 			warnd_unexpected_pi = 1;
 		}
 	}
-	if (events & EPOLLERR)
-		ep_reap_completions(self, conn, events);
 
 	if (!(events & (EPOLLOUT | EPOLLIN | EPOLLERR)))
 		warnx("Connection has nothing to do %x", events);
