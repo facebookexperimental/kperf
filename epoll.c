@@ -419,16 +419,10 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 			return false;
 		}
 
-		conn->to_recv -= n;
-		conn->tot_recv += n;
-
-		if (!conn->to_recv) {
-			worker_recv_finished(self, conn);
-			if (conn->to_send) {
-				if (!ep_handle_send(self, conn, 0))
-					return false;
-				break;
-			}
+		if (worker_recv_progress(self, conn, n)) {
+			if (!ep_handle_send(self, conn, 0))
+				return false;
+			break;
 		}
 
 		if (n != conn->read_size)

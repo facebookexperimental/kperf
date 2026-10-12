@@ -378,11 +378,11 @@ worker_send_finished(struct worker_state *self, struct worker_connection *conn)
 		conn->to_recv =	conn->spec->arg.rr.req_size;
 }
 
-void
+bool
 worker_recv_finished(struct worker_state *self, struct worker_connection *conn)
 {
 	if (!self->test)
-		return;
+		return false;
 
 	if (conn->spec->type != KPM_TEST_TYPE_RR)
 		warnx("Done sending for non-RR test");
@@ -391,6 +391,37 @@ worker_recv_finished(struct worker_state *self, struct worker_connection *conn)
 		conn->to_send =	conn->spec->arg.rr.req_size;
 	else
 		conn->to_send =	conn->spec->arg.rr.resp_size;
+	return true;
+}
+
+/* Returns true if the caller has to start sending, nothing being sent */
+bool
+worker_recv_progress(struct worker_state *self, struct worker_connection *conn,
+		     size_t n)
+{
+	static bool warned;
+	bool kick = false;
+
+	while (n) {
+		size_t chunk = n < conn->to_recv ? n : conn->to_recv;
+
+		if (!chunk) {
+			if (!warned && self->test) {
+				warnx("%zu bytes beyond the expected data", n);
+				warned = true;
+			}
+			conn->tot_recv += n;
+			break;
+		}
+		conn->to_recv -= chunk;
+		conn->tot_recv += chunk;
+		n -= chunk;
+
+		if (!conn->to_recv && worker_recv_finished(self, conn))
+			kick = true;
+	}
+
+	return kick;
 }
 
 /* == Main loop == */

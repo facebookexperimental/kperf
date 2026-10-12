@@ -211,14 +211,8 @@ static void iou_handle_recv(struct worker_state *self, struct io_uring_cqe *cqe)
 		      conn->tot_recv % PATTERN_PERIOD,
 		      conn->tot_recv);
 
-	conn->to_recv -= n;
-	conn->tot_recv += n;
-
-	if (!conn->to_recv) {
-		worker_recv_finished(self, conn);
-		if (conn->to_send)
-			iou_conn_add_send(ring, conn);
-	}
+	if (worker_recv_progress(self, conn, n))
+		iou_conn_add_send(ring, conn);
 
 	iou_conn_add_recv(ring, conn);
 }
@@ -267,14 +261,8 @@ static void iou_handle_recvzc(struct worker_state *self, struct io_uring_cqe *cq
 		      conn->tot_recv % PATTERN_PERIOD,
 		      conn->tot_recv);
 
-	conn->to_recv -= n;
-	conn->tot_recv += n;
-
-	if (!conn->to_recv) {
-		worker_recv_finished(self, conn);
-		if (conn->to_send)
-			iou_conn_add_send(ring, conn);
-	}
+	if (worker_recv_progress(self, conn, n))
+		iou_conn_add_send(ring, conn);
 
 	rq_ring = &state->rq;
 	rqe = &rq_ring->rqes[rq_ring->rq_tail & state->rq_mask];
