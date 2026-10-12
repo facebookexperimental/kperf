@@ -881,7 +881,8 @@ int main(int argc, char *argv[])
 	 */
 	if (dst_mode.rx_mode == KPM_RX_MODE_DEVMEM ||
 	    (dst_mode.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY && dst_mode.iou)) {
-		if (kpm_req_setup_rx_steering(dst, dst_mode.num_rx_queues) < 0) {
+		if (kpm_req_setup_rx_steering(dst, dst_mode.num_rx_queues,
+					      NULL, 0) < 0) {
 			warnx("Failed to setup destination RX steering");
 			goto out;
 		}
