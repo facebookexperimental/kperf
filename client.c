@@ -48,6 +48,7 @@ static struct {
 	unsigned int req_size;
 	unsigned int resp_size;
 	unsigned int rps;
+	unsigned int warmup_ms;
 	unsigned int read_size;
 	unsigned int write_size;
 	unsigned int pin_off;
@@ -213,6 +214,9 @@ static const struct opt_table opts[] = {
 		     &opt.req_size, "Request size"),
 	OPT_WITH_ARG("--resp-size <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.resp_size, "Response size"),
+	OPT_WITH_ARG("--warmup <ms>", opt_set_uintval, opt_show_uintval,
+		     &opt.warmup_ms,
+		     "Leave the requests of the first <ms> of the test, which run cold as it starts, out of the latencies"),
 	OPT_WITH_ARG("--rps <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.rps,
 		     "Open loop RR: requests per second per connection, 0 for closed loop"),
@@ -1030,6 +1034,7 @@ int main(int argc, char *argv[])
 			test->specs[i].arg.rr.resp_size = opt.resp_size ?: opt.req_size;
 			test->specs[i].arg.rr.timings = opt.time_stats;
 			test->specs[i].arg.rr.rps = opt.rps;
+			test->specs[i].arg.rr.warmup_ms = opt.warmup_ms;
 		}
 	}
 
