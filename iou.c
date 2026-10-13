@@ -117,6 +117,13 @@ static void iou_conn_start_send(struct worker_state *self,
 		iou_conn_add_send(get_ring(self), conn);
 }
 
+static bool iou_kick_send(struct worker_state *self,
+			  struct worker_connection *conn)
+{
+	iou_conn_start_send(self, conn);
+	return true;
+}
+
 static void iou_handle_send(struct worker_state *self, struct io_uring_cqe *cqe)
 {
 	struct worker_connection *conn;
@@ -591,6 +598,7 @@ static const struct io_ops iou_io_ops = {
 	.wait		= iou_wait,
 	.conn_add	= iou_conn_add,
 	.conn_close	= iou_conn_close,
+	.kick_send	= iou_kick_send,
 	.exit		= iou_exit,
 };
 
