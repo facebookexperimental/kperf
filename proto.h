@@ -292,6 +292,7 @@ struct kpm_test_results {
 		__u32 p99;
 		__u32 p999;
 		__u32 p9999;
+		__u32 lat_max;
 	} res[0];
 };
 

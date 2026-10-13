@@ -72,7 +72,7 @@ Request/response tests
 
 ``--req-size`` (and optionally ``--resp-size``) switches from a stream to
 request/response (RR) traffic.  ``--time-stats 1`` adds a latency
-histogram, ``--time-stats 2`` also percentiles.
+histogram, ``--time-stats 2`` also percentiles and the max.
 
 By default RR is closed loop: one request in flight per connection, the
 next one is sent when the response arrives, so the request rate is as high

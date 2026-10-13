@@ -601,13 +601,14 @@ dump_result(struct kpm_test_results *result,
 		return;
 
 	for (r = 0; r < opt.n_conns; r++)
-		warnx("p25:%lluus p50:%lluus p90:%lluus p99:%lluus p999:%lluus p9999:%lluus",
+		warnx("p25:%lluus p50:%lluus p90:%lluus p99:%lluus p999:%lluus p9999:%lluus max:%lluus",
 		      lat_us(result->res[r].p25),
 		      lat_us(result->res[r].p50),
 		      lat_us(result->res[r].p90),
 		      lat_us(result->res[r].p99),
 		      lat_us(result->res[r].p999),
-		      lat_us(result->res[r].p9999));
+		      lat_us(result->res[r].p9999),
+		      lat_us(result->res[r].lat_max));
 }
 
 static void
@@ -648,6 +649,7 @@ dump_result_machine(struct kpm_test_results *result,
 		S(p999);
 		S(p9999);
 #undef S
+		res.lat_max = max(res.lat_max, result->res[r].lat_max);
 	}
 	res.rtt /= opt.n_conns;
 	res.rttvar /= opt.n_conns;
@@ -666,7 +668,7 @@ dump_result_machine(struct kpm_test_results *result,
 		for (i = 0; i < 2; i++) {
 			printf("tcp,,,,,,,");
 			if (opt.time_stats >= 2)
-				printf("latency,(us),,,,,");
+				printf("latency,(us),,,,,,");
 			if (rr)
 				printf(opt.rps ? "rr,,,," : "rr,");
 			if (opt.n_conns < 2) {
@@ -679,7 +681,7 @@ dump_result_machine(struct kpm_test_results *result,
 		for (i = 0; i < 2; i++) {
 			printf("retrans,reord,ce,rtt,rttvar,swnd,cwnd,");
 			if (opt.time_stats >= 2)
-				printf("p25,p50,p90,p99,p999,p9999,");
+				printf("p25,p50,p90,p99,p999,p9999,max,");
 			if (rr)
 				printf(opt.rps ? "rps,target,sent,max_inflight," :
 				       "rps,");
@@ -698,12 +700,13 @@ dump_result_machine(struct kpm_test_results *result,
 
 	/* Open loop latency is measured only by the requesting side */
 	if (opt.time_stats >= 2 && opt.rps && !local)
-		printf(",,,,,,");
+		printf(",,,,,,,");
 	else if (opt.time_stats >= 2)
-		printf("%llu,%llu,%llu,%llu,%llu,%llu,",
+		printf("%llu,%llu,%llu,%llu,%llu,%llu,%llu,",
 		       lat_us(res.p25), lat_us(res.p50),
 		       lat_us(res.p90), lat_us(res.p99),
-		       lat_us(res.p999), lat_us(res.p9999));
+		       lat_us(res.p999), lat_us(res.p9999),
+		       lat_us(res.lat_max));
 
 	if (rr)
 		printf("%.1lf,", res.reqs * 1000000.0 / result->time_usec);
