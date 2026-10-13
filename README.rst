@@ -86,8 +86,7 @@ achieved request rate, requests sent and the max number in flight.
 Requests still in flight at the end of the test are not counted.  Open
 loop sets ``TCP_NODELAY``, Nagle would hold requests behind unacked ones.
 TCP autocorking may still delay a request until the previous one left the
-host, set ``net.ipv4.tcp_autocorking=0`` to avoid that.  Open loop is not
-supported with io_uring yet.
+host, set ``net.ipv4.tcp_autocorking=0`` to avoid that.
 
 ``--warmup <ms>`` leaves the requests of the first ``<ms>`` of the test out
 of the latencies: they run cold, as the test starts, and the first one of

@@ -843,8 +843,6 @@ int main(int argc, char *argv[])
 
 	if (opt.rps && opt.req_size == ~0U)
 		errx(1, "--rps needs --req-size");
-	if (opt.rps && (opt.iou_src || opt.iou_dst))
-		errx(1, "--rps is not supported with io_uring");
 
 	addr = net_client_lookup(opt.src, opt.src_svc, AF_UNSPEC, SOCK_STREAM);
 	if (!addr)
