@@ -495,16 +495,19 @@ err:
 
 static void iou_wait(struct worker_state *self, __s64 nsec)
 {
+	struct __kernel_timespec timeout, *tsp = NULL;
 	struct io_uring *ring = get_ring(self);
-	struct __kernel_timespec timeout;
 	struct io_uring_cqe *cqe;
 	unsigned int count = 0;
 	unsigned int head;
 
-	timeout.tv_sec = nsec / 1000000000;
-	timeout.tv_nsec = nsec % 1000000000;
+	if (nsec >= 0) {
+		timeout.tv_sec = nsec / 1000000000;
+		timeout.tv_nsec = nsec % 1000000000;
+		tsp = &timeout;
+	}
 
-	io_uring_submit_and_wait_timeout(ring, &cqe, 1, &timeout, NULL);
+	io_uring_submit_and_wait_timeout(ring, &cqe, 1, tsp, NULL);
 
 	io_uring_for_each_cqe(ring, head, cqe) {
 		switch (get_tag(cqe->user_data)) {
