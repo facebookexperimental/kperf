@@ -64,6 +64,8 @@ worker_report_pstats(struct worker_state *self, struct worker_connection *conn,
 	data->p99 = conn->rr.log[(__u64)conn->rr.log_len * 99 / 100];
 	data->p999 = conn->rr.log[(__u64)conn->rr.log_len * 999 / 1000];
 	data->p9999 = conn->rr.log[(__u64)conn->rr.log_len * 9999 / 10000];
+	if (conn->rr.log_len)
+		data->lat_max = conn->rr.log[conn->rr.log_len - 1];
 }
 
 static void
