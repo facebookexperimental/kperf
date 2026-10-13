@@ -38,6 +38,7 @@ worker_kill_conn(struct worker_state *self, struct worker_connection *conn)
 }
 
 #define NSEC_PER_SEC	1000000000ULL
+#define NSEC_PER_MSEC	1000000ULL
 
 static __u64 worker_ns(struct timemono t)
 {
@@ -69,10 +70,14 @@ worker_report_pstats(struct worker_state *self, struct worker_connection *conn,
 }
 
 static void
-worker_record_lat(struct worker_connection *conn, __u64 nsec)
+worker_record_lat(struct worker_connection *conn, __u64 start, __u64 nsec)
 {
 	unsigned int lat;
 	int hist_idx;
+
+	/* The first ones run cold, as the test sets up */
+	if (start < conn->rr.warmup_end_ns)
+		return;
 
 	lat = nsec / KPM_LAT_UNIT_NS > ~0U ? ~0U : nsec / KPM_LAT_UNIT_NS;
 
@@ -211,7 +216,7 @@ worker_rr_response(struct worker_state *self, struct worker_connection *conn)
 			     (conn->rr.sched_size - 1)];
 	conn->rr.reqs++;
 	if (conn->spec->arg.rr.timings)
-		worker_record_lat(conn, worker_ns(time_mono()) - due);
+		worker_record_lat(conn, due, worker_ns(time_mono()) - due);
 
 	if (conn->rr.sched_tail != conn->rr.sched_head)
 		conn->to_recv = conn->spec->arg.rr.resp_size;
@@ -355,6 +360,7 @@ static void
 worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 {
 	struct kpm_test *req = (void *)hdr;
+	struct worker_connection *rr;
 	unsigned int i;
 
 	if (self->test) {
@@ -452,6 +458,10 @@ worker_msg_test(struct worker_state *self, struct kpm_header *hdr)
 
 	self->cpu_start = cpu_stat_snapshot(0);
 	self->test_start = time_mono();
+	list_for_each(&self->connections, rr, connections)
+		if (rr->spec->type == KPM_TEST_TYPE_RR)
+			rr->rr.warmup_end_ns = worker_ns(self->test_start) +
+				rr->spec->arg.rr.warmup_ms * NSEC_PER_MSEC;
 	memset(&self->prev_loop, 0, sizeof(self->prev_loop));
 	if (self->test->active) {
 		self->test_len_msec = req->time_sec * 1000;
@@ -524,8 +534,8 @@ worker_record_rr_time(struct worker_state *self, struct worker_connection *conn)
 
 	now = time_mono();
 	if (self->prev_loop.ts.tv_sec)
-		worker_record_lat(conn, time_to_nsec(timemono_between(now,
-								 self->prev_loop)));
+		worker_record_lat(conn, worker_ns(self->prev_loop),
+				  worker_ns(now) - worker_ns(self->prev_loop));
 	self->prev_loop = now;
 }
 

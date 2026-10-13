@@ -243,6 +243,10 @@ struct kpm_test {
 				__u8 timings;
 				/* Open loop: requests per second, 0 for closed loop */
 				__u32 rps;
+				/* msecs, the requests of the start of the test
+				 * are left out of the latencies
+				 */
+				__u32 warmup_ms;
 			} rr;
 		} arg;
 	} specs[0];

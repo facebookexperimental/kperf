@@ -59,6 +59,10 @@ struct worker_connection {
 			unsigned int log_len;
 			unsigned int log_len_max;
 			unsigned int *log;
+			/* Requests which start earlier, CLOCK_MONOTONIC ns,
+			 * are left out of the latencies
+			 */
+			__u64 warmup_end_ns;
 
 			/* Open loop, spec->arg.rr.rps as spec is freed early */
 			unsigned int rps;

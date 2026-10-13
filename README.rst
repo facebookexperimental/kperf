@@ -89,6 +89,10 @@ TCP autocorking may still delay a request until the previous one left the
 host, set ``net.ipv4.tcp_autocorking=0`` to avoid that.  Open loop is not
 supported with io_uring yet.
 
+``--warmup <ms>`` leaves the requests of the first ``<ms>`` of the test out
+of the latencies: they run cold, as the test starts, and the first one of
+open loop is due as soon as the test starts.
+
 With ``--out-csv`` RR tests add the achieved request rate of all
 connections, and open loop also the target, requests sent and the max in
 flight of any connection.  Fields the side receiving requests does not
