@@ -542,7 +542,7 @@ worker_record_rr_time(struct worker_state *self, struct worker_connection *conn)
 void
 worker_send_finished(struct worker_state *self, struct worker_connection *conn)
 {
-	if (worker_rr_open_loop(conn))
+	if (!self->test || worker_rr_open_loop(conn))
 		return;
 
 	worker_record_rr_time(self, conn);
