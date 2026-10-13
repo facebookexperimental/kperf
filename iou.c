@@ -124,7 +124,8 @@ static void iou_handle_send(struct worker_state *self, struct io_uring_cqe *cqe)
 		return;
 	}
 
-	conn->to_send -= n;
+	/* The end of the test may have stopped sending */
+	conn->to_send -= min_t(__u64, n, conn->to_send);
 	conn->tot_sent += n;
 
 	if (!conn->to_send)
@@ -157,7 +158,8 @@ static void iou_handle_sendzc(struct worker_state *self, struct io_uring_cqe *cq
 		return;
 	}
 
-	conn->to_send -= n;
+	/* The end of the test may have stopped sending */
+	conn->to_send -= min_t(__u64, n, conn->to_send);
 	conn->tot_sent += n;
 
 	if (!conn->to_send)
