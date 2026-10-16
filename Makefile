@@ -15,6 +15,7 @@ CCAN_OBJS := $(CCAN_SRCS:.c=.o)
 CCAN_CONFIG := $(CCAN_PATH)/config.h
 
 CC=gcc
+PREFIX ?= /usr/local
 CFLAGS=-std=gnu99   -I$(CCAN_PATH)   -O2   -W -Wall -Wextra -Wno-unused-parameter -Wshadow   -DDEBUG   -g
 CFLAGS += -I$(YNL_PATH)/include/
 CFLAGS += -I$(LIBURING_PATH)/src/include/
@@ -66,6 +67,10 @@ clean:
 	$(MAKE) clean -C $(YNL_PATH)
 	rm -f $(YNL_PATH)/libynl.a
 
+install: server client
+	install -D -m 755 server $(PREFIX)/bin/kperf-server
+	install -D -m 755 client $(PREFIX)/bin/kperf-client
+
 distclean: clean
 	rm -rf $(CCAN_PATH)/libccan.a
 	$(MAKE) clean -C $(LIBURING_PATH)
@@ -79,5 +84,5 @@ cpu_stat: $(CCAN_PATH)/libccan.a
 %.o: %.c | $(CCAN_CONFIG)
 	$(COMPILE.c) -MMD -o $@ $<
 
-.PHONY: all clean units ccan distclean
+.PHONY: all clean units ccan distclean install
 .DEFAULT_GOAL=all
