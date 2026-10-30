@@ -97,13 +97,9 @@ def start():
     assert 'Bound to' in open('server.log').read()
 
 
-# A session killed with the server skips its teardown, and leaves its RX
-# steering behind: wait for the sessions to finish first.
 def stop():
     pid = int(open('server.pid').read())
     os.remove('server.pid')
-    while sh(f'pgrep -P {pid}'):
-        time.sleep(0.25)
     os.kill(pid, signal.SIGTERM)
     while not os.system(f'kill -0 {pid} 2>/dev/null'):
         time.sleep(0.25)
