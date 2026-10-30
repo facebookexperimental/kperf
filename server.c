@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -21,6 +22,7 @@
 
 #include "server.h"
 #include "proto_dbg.h"
+#include "signals.h"
 
 int verbose = 3;
 
@@ -202,10 +204,28 @@ static void print_listener(int *fds, int num_fds)
 	}
 }
 
+static volatile sig_atomic_t stop;
+
+static void stop_sig_handler(int sig)
+{
+	stop = 1;
+}
+
+static void server_stop_sessions(void)
+{
+	struct server_session *ses;
+
+	list_for_each(&sessions, ses, sessions)
+		kill(ses->pid, SIGTERM);
+	while (wait(NULL) > 0)
+		;
+}
+
 int main(int argc, char *argv[])
 {
 	int fds[2], i, num_fds, max_fd;
 	struct addrinfo *addr;
+	sigset_t old_sigs;
 
 	opt_register_table(opts, NULL);
 	if (!opt_parse(&argc, argv, opt_log_stderr))
@@ -235,11 +255,13 @@ int main(int argc, char *argv[])
 	max_fd = num_fds == 1 || fds[0] > fds[1] ? fds[0] : fds[1];
 
 	signal(SIGCHLD, chld_sig_handler);
+	block_term_signals(&old_sigs);
+	trap_term_signals(stop_sig_handler);
 
-	while (true) {
+	while (!stop) {
+		struct timespec ts = { .tv_sec = 1 };
 		struct sockaddr_in6 sockaddr;
 		struct server_session *ses;
-		struct timeval tv;
 		socklen_t addrlen;
 		int cfd, fd, ret;
 		fd_set rfds;
@@ -248,11 +270,10 @@ int main(int argc, char *argv[])
 		for (i = 0; i < num_fds; i++)
 			FD_SET(fds[i], &rfds);
 
-		tv.tv_sec = 1;
-		tv.tv_usec = 0;
-
-		ret = select(max_fd + 1, &rfds, NULL, NULL, &tv);
+		ret = pselect(max_fd + 1, &rfds, NULL, NULL, &ts, &old_sigs);
 		if (ret < 0) {
+			if (errno == EINTR && stop)
+				break;
 			if (errno == EINTR && chld)
 				goto reap_child;
 			err(2, "Failed to select");
@@ -283,5 +304,6 @@ reap_child:
 		server_reap_sessions();
 	}
 
+	server_stop_sessions();
 	return 0;
 }

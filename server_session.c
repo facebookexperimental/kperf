@@ -33,12 +33,14 @@
 #include "server.h"
 #include "devmem.h"
 #include "iou.h"
+#include "signals.h"
 
 extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
 struct session_state {
 	int main_sock;
 	int epollfd;
+	int sigfd;
 	int quit;
 	int tcp_sock;
 	enum kpm_rx_mode rx_mode;
@@ -1203,6 +1205,12 @@ static void server_session_loop(int fd)
 	if (epoll_ctl(self.epollfd, EPOLL_CTL_ADD, fd, &ev) < 0)
 		err(2, "Failed to init epoll");
 
+	self.sigfd = term_signals_fd();
+	ev.events = EPOLLIN;
+	ev.data.fd = self.sigfd;
+	if (epoll_ctl(self.epollfd, EPOLL_CTL_ADD, self.sigfd, &ev) < 0)
+		err(2, "Failed to add signalfd to epoll");
+
 	while (!self.quit) {
 		int nfds;
 
@@ -1213,7 +1221,9 @@ static void server_session_loop(int fd)
 		for (i = 0; i < nfds; i++) {
 			struct epoll_event *e = &events[i];
 
-			if (e->data.fd == self.main_sock)
+			if (e->data.fd == self.sigfd)
+				self.quit = 1;
+			else if (e->data.fd == self.main_sock)
 				session_handle_main_sock(&self);
 			else if (e->data.fd == self.tcp_sock)
 				session_handle_accept_sock(&self);
@@ -1242,6 +1252,8 @@ static void server_session_loop(int fd)
 
 static NORETURN void server_session(int fd)
 {
+	reset_term_signals();
+
 	if (!kpm_xchg_hello(fd, NULL))
 		server_session_loop(fd);
 	close(fd);

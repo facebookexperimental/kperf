@@ -95,10 +95,10 @@ recurse into it.
   traffic of its NIC.  setup adds a /128 route through the NIC's gateway.
 - kperf resets the RSS table with the legacy ioctl, which turns symmetric
   hashing (`symmetric-or-xor`) off on mlx5.  restore turns it back on.
-- A session which dies (a crash, a failed setup, a kill) leaves its ntuple
-  rules, RSS contexts and a changed default RSS table behind.  restore
-  removes those which weren't there before.  Stop servers only once their
-  sessions are gone, which restore waits for.
+- A session which dies (a crash, SIGKILL) leaves its ntuple rules, RSS
+  contexts and a changed default RSS table behind.  restore removes those
+  which weren't there before.  Stop servers with SIGTERM, as restore does:
+  they stop their sessions cleanly and wait for them.
 - The devmem RX dma-buf is shared by the queues of the test, 128MB is
   enough for one: with 4 queues and less memory, connections stall.
 - Hosts get rebooted into other kernels: check `uname -r` before a run.
