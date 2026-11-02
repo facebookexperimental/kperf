@@ -745,6 +745,7 @@ int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_ty
 {
 	char ifname[IFNAMSIZ] = {};
 	struct ynl_error yerr;
+	size_t size;
 	int ifindex;
 	int ret;
 
@@ -760,7 +761,8 @@ int devmem_setup_tx(struct session_state_devmem *devmem, enum memory_provider_ty
 	if (txmp->dev_init && txmp->dev_init(&devmem->tx_dev) < 0)
 		return -1;
 
-	devmem->tx_mem = txmp->alloc(devmem->dmabuf_tx_size_mb * 1024 * 1024, 0);
+	size = (size_t)devmem->dmabuf_tx_size_mb * 1024 * 1024;
+	devmem->tx_mem = txmp->alloc(size, 0);
 	if (!devmem->tx_mem) {
 		warnx("Failed to allocate devmem tx buffer");
 		return -1;
