@@ -178,6 +178,7 @@ struct kpm_mode {
 
 	/* TCP_ZEROCOPY_RECEIVE */
 	__u32 zc_rx_batch;
+	__u32 zc_rx_copybuf;
 };
 
 struct kpm_setup_rx_steering {

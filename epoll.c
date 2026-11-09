@@ -101,6 +101,20 @@ ep_zc_rx_add(struct worker_state *self, struct worker_connection *conn)
 	}
 	conn->zc.area = ALIGN_PTR_UP(conn->zc.map, huge);
 
+	/* Reads which find at most this much queued are copied, as is what
+	 * doesn't fill a page, and up to this much more of the skb a read
+	 * stops in, mappable or not.  Whole pages: a copy which ends inside a
+	 * page would leave the next read starting there, and nothing is mapped
+	 * from mid-page.
+	 */
+	conn->zc.copybuf_len = ALIGN_UP((size_t)self->opts.zc_rx_copybuf ?: 1,
+					page_size);
+	conn->zc.copybuf = malloc(conn->zc.copybuf_len);
+	if (!conn->zc.copybuf) {
+		warnx("No memory");
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -108,6 +122,7 @@ static void ep_zc_rx_close(struct worker_connection *conn)
 {
 	if (conn->zc.map)
 		munmap(conn->zc.map, conn->zc.map_len);
+	free(conn->zc.copybuf);
 }
 
 static struct worker_connection *
@@ -394,15 +409,20 @@ ep_handle_zerocopy_recv(struct worker_state *self, struct worker_connection *con
 	unsigned char *addr;
 	void *src;
 
+	/* Less than a page maps nothing, the kernel copies it instead, and
+	 * fails with EFAULT when that spans skbs.  Reading ahead is fine,
+	 * closed loop never has more queued than it expects.
+	 */
 	chunk = min_t(size_t, chunk, conn->zc.read_len);
+	chunk = max_t(size_t, chunk, page_size);
 	if (conn->zc.off + chunk > conn->zc.area_len)
 		ep_zc_rx_unmap(conn);
 	addr = conn->zc.area + conn->zc.off;
 
 	zc.address = (__u64)(unsigned long)addr;
 	zc.length = chunk;
-	zc.copybuf_address = (__u64)(unsigned long)conn->rxbuf;
-	zc.copybuf_len = chunk;
+	zc.copybuf_address = (__u64)(unsigned long)conn->zc.copybuf;
+	zc.copybuf_len = conn->zc.copybuf_len;
 	zc.flags = TCP_RECEIVE_ZEROCOPY_FLAG_TLB_CLEAN_HINT;
 	if (getsockopt(conn->fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE,
 		       &zc, &len))
@@ -415,8 +435,6 @@ ep_handle_zerocopy_recv(struct worker_state *self, struct worker_connection *con
 		errno = zc.err ? -zc.err : -zc.copybuf_len;
 		return -1;
 	}
-	/* Sometimes getsockopt returns 0 for both length and copybuf_len, try
-	 * again */
 	if (!zc.length && !zc.copybuf_len) {
 		errno = EAGAIN;
 		return -1;
@@ -430,9 +448,10 @@ ep_handle_zerocopy_recv(struct worker_state *self, struct worker_connection *con
 		      conn->tot_recv, rep);
 
 	src = &patbuf[(conn->tot_recv + zc.length) % PATTERN_PERIOD];
-	if (self->opts.validate && memcmp(conn->rxbuf, src, zc.copybuf_len))
+	if (self->opts.validate &&
+	    memcmp(conn->zc.copybuf, src, zc.copybuf_len))
 		warnx("Data corruption %d %d %d %lld %lld %d",
-		      *conn->rxbuf, *(char *)src, zc.copybuf_len,
+		      *conn->zc.copybuf, *(char *)src, zc.copybuf_len,
 		      (conn->tot_recv + zc.length) % PATTERN_PERIOD,
 		      conn->tot_recv + zc.length, rep);
 

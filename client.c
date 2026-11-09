@@ -70,6 +70,7 @@ static struct {
 	bool iou_dst;
 	bool zerocopy_rx;
 	unsigned int zc_rx_batch;
+	unsigned int zc_rx_copybuf;
 	unsigned int iou_rx_size_mb;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
@@ -107,6 +108,7 @@ static struct {
 	.iou_dst = false,
 	.zerocopy_rx = false,
 	.zc_rx_batch = 2 << 20,
+	.zc_rx_copybuf = 16 * 1024,
 	.iou_rx_size_mb = 64,
 };
 
@@ -308,6 +310,9 @@ static const struct opt_table opts[] = {
 	OPT_WITH_ARG("--zerocopy-rx-batch <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.zc_rx_batch,
 		     "TCP_ZEROCOPY_RECEIVE: keep up to <arg> bytes mapped, and unmap them at once, with one TLB flush; a read maps at most that much (rounded up to pages)"),
+	OPT_WITH_ARG("--zerocopy-rx-copybuf <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.zc_rx_copybuf,
+		     "TCP_ZEROCOPY_RECEIVE: copy reads which find at most <arg> bytes queued, and up to <arg> past what each read maps (rounded up to pages)"),
 	OPT_WITH_ARG("--iou-rx-size-mb <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.iou_rx_size_mb, "Size of RX memory reserved by io_uring"),
 	OPT_ENDTABLE
@@ -851,6 +856,8 @@ int main(int argc, char *argv[])
 
 	if (!opt.zc_rx_batch)
 		errx(1, "--zerocopy-rx-batch must be at least 1");
+	if (opt.zc_rx_copybuf > KPM_MAX_OP_CHUNK)
+		errx(1, "Max --zerocopy-rx-copybuf is %d", KPM_MAX_OP_CHUNK);
 
 	addr = net_client_lookup(opt.src, opt.src_svc, AF_UNSPEC, SOCK_STREAM);
 	if (!addr)
@@ -917,6 +924,7 @@ int main(int argc, char *argv[])
 		.iou = opt.iou_dst,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
 		.zc_rx_batch = opt.zc_rx_batch,
+		.zc_rx_copybuf = opt.zc_rx_copybuf,
 	};
 	struct kpm_mode src_mode = {
 		.rx_mode = rx_mode == KPM_RX_MODE_DEVMEM && !rr ?
@@ -934,6 +942,7 @@ int main(int argc, char *argv[])
 		.iou = opt.iou_src,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
 		.zc_rx_batch = opt.zc_rx_batch,
+		.zc_rx_copybuf = opt.zc_rx_copybuf,
 	};
 	/*
 	 * Set up the final RSS contexts before creating connections so the
