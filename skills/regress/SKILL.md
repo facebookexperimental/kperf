@@ -6,11 +6,15 @@ description: Run kperf's regression test (scripts/regress.py) between two hosts 
 # kperf regression run
 
 `scripts/regress.py <host1> <if1> <host2> <if2>` runs streams over 4
-connections, closed loop RR and open loop RR, each over sockets,
-MSG_ZEROCOPY, devmem in both directions and io_uring with zero copy send:
-12 runs of a minute, about 13 minutes in all.  host1 sends, host2 receives.
-It prints TAP, with each side's rate, busy CPUs (1.00 is one CPU fully
-busy) and latencies, and exits with the number of failures.
+connections, closed loop RR and open loop RR, over sockets, io_uring and
+devmem in both directions.  The socket and io_uring streams copy, and
+send with zero copy (`tx-zc`, MSG_ZEROCOPY) discarding on receive
+(`rx-trunc`, `--msg-trunc`), the best case for zero copy receive; socket
+streams also receive with TCP zero copy receive (`rx-zc`).  RR also runs
+over sockets with MSG_ZEROCOPY: 14 runs of a minute, about 16 minutes in
+all.  host1 sends, host2 receives.  It prints TAP, with each side's rate,
+busy CPUs (1.00 is one CPU fully busy) and latencies, and exits with the
+number of failures.
 
 It only runs the client, on host1.  Copying kperf, setting up the hosts,
 the servers and restoring the hosts are up to you, with `scripts/host.py`.
@@ -32,6 +36,9 @@ Both hosts need root access, the same kernel, and NICs with devmem support
   done
   ```
 - The link is up at full speed, and has a global IPv6 address.
+- The MTU fits a 4K payload with the IPv6, TCP and timestamp headers,
+  4168 bytes: TCP zero copy receive maps only segments which fill pages,
+  its stream passes `--mss 4108`.
 - The interrupt of queue N is on CPU N (`/proc/interrupts`,
   `/proc/irq/*/smp_affinity_list`), on the NIC's NUMA node.  regress.py
   runs each worker 4 CPUs above the interrupt of its flow (`--pin-off 4`).
@@ -87,9 +94,10 @@ recurse into it.
 
 - udmabuf allocations are capped by `size_limit_mb` of the udmabuf module,
   64MB by default.  The streams use 2GB dma-bufs: setup raises it to 2048.
-- devmem RX needs header split (`ethtool -G tcp-data-split on`), and on
-  mlx5 header split needs hardware GRO (`rx-gro-hw`).  mlx5 won't turn GRO
-  off while splitting headers: restore turns header split off first.
+- devmem RX and TCP zero copy receive need header split (`ethtool -G
+  tcp-data-split on`), and on mlx5 header split needs hardware GRO
+  (`rx-gro-hw`).  mlx5 won't turn GRO off while splitting headers: restore
+  turns header split off first.
 - devmem RX needs `hds-thresh` 0, some NICs default to more (fbnic 1536).
 - Hosts may route the peer through another NIC; devmem only sees the
   traffic of its NIC.  setup adds a /128 route through the NIC's gateway.
@@ -101,6 +109,10 @@ recurse into it.
   sessions are gone, which restore waits for.
 - The devmem RX dma-buf is shared by the queues of the test, 128MB is
   enough for one: with 4 queues and less memory, connections stall.
+- After devmem RR, the source's NIC passes no traffic for a few seconds
+  while devmem is torn down, and a run started then fails to connect
+  (`Connection refused`, as kperf reports any failed connect).  regress.py
+  waits 10s after devmem runs.
 - Hosts get rebooted into other kernels: check `uname -r` before a run.
 - `--rx-page-size` above 4K needs hugepages, DCTCP needs
   `net.ipv4.tcp_ecn=1` or falls back to Reno.  regress.py uses neither.
@@ -113,11 +125,14 @@ Every run should be `ok`.  A `not ok` line is followed by the client's
 command and output.  Compare against a previous run between the same
 hosts and NICs:
 
-- Stream rates are each side's sum over the connections.  The streams
-  other than devmem discard on receive (`--msg-trunc`).  On 400G mlx5,
-  the streams which don't copy on send reach line rate (about 389 Gbps),
-  the socket stream is limited by the sender copying.
-- Closed loop RR on mlx5 does about 20-25k requests per second, at p50
-  of about 36us.  Open loop sends 10k requests per second.
+- Stream rates are each side's sum over the connections.  On 400G mlx5,
+  the streams which copy on neither side reach line rate (about 389
+  Gbps): tx-zc rx-trunc and devmem.  The socket and io_uring streams
+  copy on both sides, and do about 230 Gbps.  rx-zc does about 195 Gbps:
+  the kernel copies what is queued when it fits the copy buffer, which
+  kperf makes as large as a read, 64MB here, so it copies everything.
+- Closed loop RR on mlx5 does about 22-25k requests per second, at p50
+  of about 36us, and about 13k at 72-77us with MSG_ZEROCOPY and devmem.
+  Open loop sends 10k requests per second.
 - `max` and the open loop tail percentiles show stalls of the hosts
   themselves; some hosts stall for about 67ms periodically.
