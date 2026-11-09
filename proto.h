@@ -175,6 +175,9 @@ struct kpm_mode {
 	__u8 validate;
 	__u8 iou;
 	__u32 iou_rx_size_mb;
+
+	/* TCP_ZEROCOPY_RECEIVE */
+	__u32 zc_rx_batch;
 };
 
 struct kpm_setup_rx_steering {
