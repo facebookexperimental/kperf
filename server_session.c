@@ -56,6 +56,7 @@ struct session_state {
 	bool validate;
 	bool iou;
 	unsigned int zc_rx_batch;
+	unsigned int zc_rx_copybuf;
 };
 
 struct connection {
@@ -682,6 +683,7 @@ server_msg_mode(struct session_state *self, struct kpm_header *hdr)
 	self->iou = req->iou;
 	self->iou_state.rx_size_mb = req->iou_rx_size_mb;
 	self->zc_rx_batch = req->zc_rx_batch;
+	self->zc_rx_copybuf = req->zc_rx_copybuf;
 
 	if (req->tx_mode == KPM_TX_MODE_DEVMEM) {
 		struct connection *conn;
@@ -754,6 +756,7 @@ server_msg_spawn_worker(struct session_state *self, struct kpm_header *hdr)
 	opts->iou.ifindex = self->rx_steering.ifindex;
 	opts->iou.queue_id = self->rx_steering.queue_id + self->worker_ids;
 	opts->zc_rx_batch = self->zc_rx_batch;
+	opts->zc_rx_copybuf = self->zc_rx_copybuf;
 	if (pthread_create(&wrk->thread, &attr, worker_main, opts) != 0) {
 		warnx("Failed to create worker thread");
 		free(opts);

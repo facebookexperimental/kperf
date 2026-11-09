@@ -57,6 +57,9 @@ struct worker_connection {
 		unsigned char *area;
 		size_t area_len;
 		size_t off;
+		/* What the kernel copies rather than maps */
+		unsigned char *copybuf;
+		size_t copybuf_len;
 	} zc;
 
 	struct connection_devmem devmem;
