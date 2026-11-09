@@ -4,10 +4,13 @@
 
 """
 Run kperf between two hosts with streams over 4 connections, closed loop
-and open loop RR, each over sockets, MSG_ZEROCOPY, devmem in both
-directions and io_uring with zero copy send, for a minute each.  Reports
-the runs in TAP, with the rate, the busy CPUs and the latencies of each
-side, and exits with the number of failures.
+and open loop RR, over sockets, io_uring and devmem in both directions,
+for a minute each.  The socket and io_uring streams copy, and send with
+zero copy (MSG_ZEROCOPY) discarding on receive (--msg-trunc), the best
+case for zero copy receive; socket streams also receive with TCP zero
+copy receive.  RR also runs over sockets with MSG_ZEROCOPY.  Reports the
+runs in TAP, with the rate, the busy CPUs and the latencies of each side,
+and exits with the number of failures.
 
 host1 sends and host2 receives.  The client runs on host1 as root, through
 the ssh command in $SSH (default ssh), as $KPERF_CLIENT (default
@@ -21,32 +24,40 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 STREAM = ['--num-connections', '4', '--num-rx-queues', '4',
           '--dmabuf-rx-size-mb', '2048', '--dmabuf-tx-size-mb', '2048',
           '--read-size', '67108864', '--write-size', '67108864']
 RR = ['-s', '4096', '--resp-size', '4096', '-T', '2', '--warmup', '100']
 OPEN_LOOP = RR + ['--rps', '10000']
+RX_ZC = ['--zerocopy-rx', '--mss', '4108']  # 4K MSS + page flipping
+RX_TRUNC = ['--msg-trunc']  # approximate RX ZC best case
+TX_ZC = ['--msg-zerocopy']
 DEVMEM = ['--devmem-rx', '--devmem-tx']
-IOU = ['--iou-src', '--iou-dst', '--msg-zerocopy']
+IOU = ['--iou-src', '--iou-dst']
 RUNS = {
-    'stream socket': STREAM + ['--msg-trunc'],
-    'stream zerocopy': STREAM + ['--msg-zerocopy', '--msg-trunc'],
+    'stream socket': STREAM,
+    'stream socket tx-zc rx-trunc': STREAM + TX_ZC + RX_TRUNC,
+    'stream socket tx-zc rx-zc': STREAM + TX_ZC + RX_ZC,
+    'stream io_uring': STREAM + IOU,
+    'stream io_uring tx-zc rx-trunc': STREAM + IOU + TX_ZC + RX_TRUNC,
     'stream devmem': STREAM + DEVMEM,
-    'stream io_uring': STREAM + IOU + ['--msg-trunc'],
     'rr socket': RR,
-    'rr zerocopy': RR + ['--msg-zerocopy'],
-    'rr devmem': RR + DEVMEM,
+    'rr socket tx-zc': RR + TX_ZC,
     'rr io_uring': RR + IOU,
+    'rr devmem': RR + DEVMEM,
     'open-loop socket': OPEN_LOOP,
-    'open-loop zerocopy': OPEN_LOOP + ['--msg-zerocopy'],
-    'open-loop devmem': OPEN_LOOP + DEVMEM,
+    'open-loop socket tx-zc': OPEN_LOOP + TX_ZC,
     'open-loop io_uring': OPEN_LOOP + IOU,
+    'open-loop devmem': OPEN_LOOP + DEVMEM,
 }
 CPU_FIELDS = ('usr', 'sys', 'idle', 'iow', 'irq', 'sirq')
 SSH = shlex.split(os.environ.get('SSH', 'ssh'))
 CLIENT = os.environ.get('KPERF_CLIENT', 'kperf-client')
 TIME = 60
+# Seconds to wait after a devmem run: tearing devmem down stalls the NIC
+SETTLE = 10
 
 ERROR_RE = re.compile(r'rror|ailed|died|No result|Invalid|zero send|'
                       r'not supported')
@@ -183,6 +194,8 @@ def main():
         for line in stats(test, sides):
             print(f'#   {line}')
         sys.stdout.flush()
+        if DEVMEM[0] in args:
+            time.sleep(SETTLE)
 
     sys.exit(fails)
 
