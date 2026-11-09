@@ -10,11 +10,12 @@ connections, closed loop RR and open loop RR, over sockets, io_uring and
 devmem in both directions.  The socket and io_uring streams copy, and
 send with zero copy (`tx-zc`, MSG_ZEROCOPY) discarding on receive
 (`rx-trunc`, `--msg-trunc`), the best case for zero copy receive; socket
-streams also receive with TCP zero copy receive (`rx-zc`).  RR also runs
-over sockets with MSG_ZEROCOPY: 14 runs of a minute, about 16 minutes in
-all.  host1 sends, host2 receives.  It prints TAP, with each side's rate,
-busy CPUs (1.00 is one CPU fully busy), latencies and the share of the
-data TCP zero copy receive mapped, and exits with the number of failures.
+streams also receive with TCP zero copy receive (`rx-zc`), once more with
+the workers on their flows' interrupt CPUs (`share-core`): 13 runs of a
+minute, about 15 minutes in all.  host1 sends, host2 receives.  It prints
+TAP, with each side's rate, busy CPUs (1.00 is one CPU fully busy),
+latencies and the share of the data TCP zero copy receive mapped, and
+exits with the number of failures.
 
 It only runs the client, on host1.  Copying kperf, setting up the hosts,
 the servers and restoring the hosts are up to you, with `scripts/host.py`.
@@ -42,7 +43,8 @@ Both hosts need root access, the same kernel, and NICs with devmem support
   data got mapped.
 - The interrupt of queue N is on CPU N (`/proc/interrupts`,
   `/proc/irq/*/smp_affinity_list`), on the NIC's NUMA node.  regress.py
-  runs each worker 4 CPUs above the interrupt of its flow (`--pin-off 4`).
+  runs each worker 4 CPUs above the interrupt of its flow (`--pin-off 4`),
+  but for share-core, whose workers run on their flows' interrupt CPUs.
 
 ## Copy kperf
 
@@ -129,11 +131,12 @@ hosts and NICs:
 - Stream rates are each side's sum over the connections.  On 400G mlx5,
   the streams which copy on neither side reach line rate (about 389
   Gbps): tx-zc rx-trunc and devmem.  The socket and io_uring streams
-  copy on both sides, and do about 230 Gbps.  rx-zc does about 195 Gbps:
-  the kernel copies what is queued when it fits the copy buffer, which
-  kperf makes as large as a read, 64MB here, so it copies everything.
+  copy on both sides, and do about 190-230 Gbps.  rx-zc maps more than 99%
+  of the stream and reaches line rate too, on about 6.1 receiver CPUs, and
+  on about 3.9 with share-core, close to rx-trunc: there the pages the
+  workers unmap go back to the per-CPU lists the driver allocates from.
 - Closed loop RR on mlx5 does about 22-25k requests per second, at p50
-  of about 36us, and about 13k at 72-77us with MSG_ZEROCOPY and devmem.
+  of about 36us, and about 13k at 72-77us over devmem.
   Open loop sends 10k requests per second.
 - `max` and the open loop tail percentiles show stalls of the hosts
   themselves; some hosts stall for about 67ms periodically.
