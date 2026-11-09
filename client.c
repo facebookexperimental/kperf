@@ -522,6 +522,16 @@ static unsigned long long lat_us(unsigned long long lat)
 	return lat * KPM_LAT_UNIT_NS / 1000;
 }
 
+/* The side receives with TCP_ZEROCOPY_RECEIVE, rather than with io_uring.
+ * The source receives only responses.
+ */
+static bool tcp_zc_rx(bool local)
+{
+	if (!opt.zerocopy_rx || (local && opt.req_size == ~0U))
+		return false;
+	return !(local ? opt.iou_src : opt.iou_dst);
+}
+
 static void
 dump_result(struct kpm_test_results *result,
 	    struct kpm_connect_reply *conns, bool local)
@@ -548,6 +558,12 @@ dump_result(struct kpm_test_results *result,
 		      1000,
 		      result->res[r].rx_bytes,
 		      result->time_usec);
+	for (r = 0; tcp_zc_rx(local) && r < opt.n_conns; r++)
+		if (result->res[r].rx_bytes)
+			warnx("  Rx%7.2lf%% mapped (%llu bytes)",
+			      result->res[r].rx_mapped * 100.0 /
+			      result->res[r].rx_bytes,
+			      result->res[r].rx_mapped);
 	warnx("  TCP retrans reord rtt rttvar d_ce snd_wnd cwnd");
 	for (r = 0; r < opt.n_conns; r++)
 		warnx("      %7u %5u %3u %6u %4u %7u %4u",
@@ -631,6 +647,7 @@ dump_result_machine(struct kpm_test_results *result,
 {
 	struct kpm_test_result res = {};
 	unsigned int inflight_max = 0;
+	bool zc_rx = tcp_zc_rx(true) || tcp_zc_rx(false);
 	bool rr = opt.req_size != ~0U;
 	struct kpm_cpu_load *cpu;
 	unsigned int r;
@@ -644,6 +661,7 @@ dump_result_machine(struct kpm_test_results *result,
 #define S(f) res.f += result->res[r].f;
 		S(rx_bytes);
 		S(tx_bytes);
+		S(rx_mapped);
 		S(reqs);
 		S(rr_sent);
 		S(retrans);
@@ -685,6 +703,8 @@ dump_result_machine(struct kpm_test_results *result,
 				printf("latency,(us),,,,,,");
 			if (rr)
 				printf(opt.rps ? "rr,,,," : "rr,");
+			if (zc_rx)
+				printf("zerocopy,");
 			if (opt.n_conns < 2) {
 				printf("net,,,,");
 				if (opt.pin_off)
@@ -699,6 +719,8 @@ dump_result_machine(struct kpm_test_results *result,
 			if (rr)
 				printf(opt.rps ? "rps,target,sent,max_inflight," :
 				       "rps,");
+			if (zc_rx)
+				printf("mapped,");
 			if (opt.n_conns < 2) {
 				printf("usr,sys,idle,sirq,");
 				if (opt.pin_off)
@@ -731,6 +753,12 @@ dump_result_machine(struct kpm_test_results *result,
 		else
 			printf(",,");
 	}
+
+	/* The share of the data received which got mapped */
+	if (zc_rx && tcp_zc_rx(local) && res.rx_bytes)
+		printf("%.4f,", (double)res.rx_mapped / res.rx_bytes);
+	else if (zc_rx)
+		printf(",");
 
 	/* Dunno how to report CPU use, yet */
 	if (opt.n_conns < 2) {

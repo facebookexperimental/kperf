@@ -13,8 +13,8 @@ send with zero copy (`tx-zc`, MSG_ZEROCOPY) discarding on receive
 streams also receive with TCP zero copy receive (`rx-zc`).  RR also runs
 over sockets with MSG_ZEROCOPY: 14 runs of a minute, about 16 minutes in
 all.  host1 sends, host2 receives.  It prints TAP, with each side's rate,
-busy CPUs (1.00 is one CPU fully busy) and latencies, and exits with the
-number of failures.
+busy CPUs (1.00 is one CPU fully busy), latencies and the share of the
+data TCP zero copy receive mapped, and exits with the number of failures.
 
 It only runs the client, on host1.  Copying kperf, setting up the hosts,
 the servers and restoring the hosts are up to you, with `scripts/host.py`.
@@ -38,7 +38,8 @@ Both hosts need root access, the same kernel, and NICs with devmem support
 - The link is up at full speed, and has a global IPv6 address.
 - The MTU fits a 4K payload with the IPv6, TCP and timestamp headers,
   4168 bytes: TCP zero copy receive maps only segments which fill pages,
-  its stream passes `--mss 4108`.
+  its stream passes `--mss 4108`, and fails when less than 90% of the
+  data got mapped.
 - The interrupt of queue N is on CPU N (`/proc/interrupts`,
   `/proc/irq/*/smp_affinity_list`), on the NIC's NUMA node.  regress.py
   runs each worker 4 CPUs above the interrupt of its flow (`--pin-off 4`).

@@ -60,6 +60,8 @@ struct worker_connection {
 		/* What the kernel copies rather than maps */
 		unsigned char *copybuf;
 		size_t copybuf_len;
+		/* What the kernel mapped rather than copied, for the results */
+		__u64 mapped;
 	} zc;
 
 	struct connection_devmem devmem;

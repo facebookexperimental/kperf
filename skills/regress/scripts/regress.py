@@ -62,7 +62,8 @@ SETTLE = 10
 ERROR_RE = re.compile(r'rror|ailed|died|No result|Invalid|zero send|'
                       r'not supported')
 SIDE_RE = re.compile(r'== (Source|Target)')
-RATE_RE = re.compile(r' (Tx|Rx) *([\d.]+) Gbps')
+RATE_RE = re.compile(r' (Tx|Rx) *([\d.]+) Gbps \((\d+) bytes')
+MAPPED_RE = re.compile(r' Rx *[\d.]+% mapped \((\d+) bytes\)')
 RPS_RE = re.compile(r': ([\d.]+) RPS(?: \(target (\d+))?')
 LAT_RE = re.compile(r': (p25:.*)$')
 CPU_RE = re.compile(r'CPU\s*(\d+):' +
@@ -91,8 +92,8 @@ def parse(log):
         m = SIDE_RE.search(line)
         if m:
             side = sides.setdefault(m[1].lower(), {
-                'Tx': [], 'Rx': [], 'rps': None, 'target': None, 'cpu': {},
-                'lat': None,
+                'Tx': [], 'Rx': [], 'rx_bytes': 0, 'mapped': None,
+                'rps': None, 'target': None, 'cpu': {}, 'lat': None,
             })
             continue
         if side is None:
@@ -100,6 +101,12 @@ def parse(log):
         m = RATE_RE.search(line)
         if m:
             side[m[1]].append(float(m[2]))
+            if m[1] == 'Rx':
+                side['rx_bytes'] += int(m[3])
+            continue
+        m = MAPPED_RE.search(line)
+        if m:
+            side['mapped'] = (side['mapped'] or 0) + int(m[1])
             continue
         m = RPS_RE.search(line)
         if m:
@@ -119,6 +126,14 @@ def parse(log):
     return sides
 
 
+def mapped(side):
+    """The share of the data received which TCP zero copy receive mapped,
+    in %, or None without it"""
+    if side['mapped'] is None or not side['rx_bytes']:
+        return None
+    return 100 * side['mapped'] / side['rx_bytes']
+
+
 def check(test, rc, log, sides):
     """Return why a run failed, or None.  The client's exit status isn't
     enough: it exits 0 when a test fails to start."""
@@ -134,6 +149,9 @@ def check(test, rc, log, sides):
     if test == 'stream':
         if len(dst['Rx']) != 4 or not all(dst['Rx']):
             return 'not all connections received data'
+        # Only segments which fill pages get mapped, see RX_ZC and the MTU
+        if mapped(dst) is not None and mapped(dst) < 90:
+            return f'{mapped(dst):.2f}% of the data mapped'
         return None
     if not src['rps'] or not dst['rps']:
         return 'no RPS from both sides'
@@ -144,7 +162,8 @@ def check(test, rc, log, sides):
 
 def stats(test, sides):
     """Lines with the rate of each side, its CPUs busy, summed over the
-    CPUs of its workers and of their flows' interrupts, and its latencies"""
+    CPUs of its workers and of their flows' interrupts, the share of the
+    data it mapped, and its latencies"""
     lines = []
     for name in ('source', 'target'):
         side = sides.get(name)
@@ -157,8 +176,10 @@ def stats(test, sides):
         cpus = {f: sum(c[f] for c in side['cpu'].values()) / 100
                 for f in ('usr', 'sys', 'irq', 'sirq')}
         split = ' '.join(f'{v:.2f} {f}' for f, v in cpus.items())
-        lines.append(f'{name}: {rate}, {sum(cpus.values()):.2f} CPUs '
-                     f'({split})')
+        line = f'{name}: {rate}, {sum(cpus.values()):.2f} CPUs ({split})'
+        if mapped(side) is not None:
+            line += f', {mapped(side):.2f}% mapped'
+        lines.append(line)
         if side['lat']:
             lines.append(f"{name}: {side['lat']}")
     return lines

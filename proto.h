@@ -279,6 +279,8 @@ struct kpm_test_results {
 		enum kpm_test_type type;
 		__u64 rx_bytes;
 		__u64 tx_bytes;
+		/* Of rx_bytes, mapped by TCP_ZEROCOPY_RECEIVE */
+		__u64 rx_mapped;
 
 		__u32 reqs;
 		/* Open loop only, on the side sending requests */
