@@ -69,6 +69,7 @@ static struct {
 	bool iou_src;
 	bool iou_dst;
 	bool zerocopy_rx;
+	unsigned int zc_rx_batch;
 	unsigned int iou_rx_size_mb;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
@@ -105,6 +106,7 @@ static struct {
 	.iou_src = false,
 	.iou_dst = false,
 	.zerocopy_rx = false,
+	.zc_rx_batch = 2 << 20,
 	.iou_rx_size_mb = 64,
 };
 
@@ -302,7 +304,10 @@ static const struct opt_table opts[] = {
 	OPT_WITHOUT_ARG("--iou-dst", opt_set_bool, &opt.iou_dst,
 			"Use io_uring on destination server"),
 	OPT_EARLY_WITHOUT_ARG("--zerocopy-rx", opt_set_bool, &opt.zerocopy_rx,
-			      "Use zero copy on receive"),
+			      "Use zero copy on receive: io_uring with --iou-dst/--iou-src, else TCP_ZEROCOPY_RECEIVE"),
+	OPT_WITH_ARG("--zerocopy-rx-batch <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.zc_rx_batch,
+		     "TCP_ZEROCOPY_RECEIVE: keep up to <arg> bytes mapped, and unmap them at once, with one TLB flush; a read maps at most that much (rounded up to pages)"),
 	OPT_WITH_ARG("--iou-rx-size-mb <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.iou_rx_size_mb, "Size of RX memory reserved by io_uring"),
 	OPT_ENDTABLE
@@ -844,6 +849,9 @@ int main(int argc, char *argv[])
 	if (opt.rps && opt.req_size == ~0U)
 		errx(1, "--rps needs --req-size");
 
+	if (!opt.zc_rx_batch)
+		errx(1, "--zerocopy-rx-batch must be at least 1");
+
 	addr = net_client_lookup(opt.src, opt.src_svc, AF_UNSPEC, SOCK_STREAM);
 	if (!addr)
 		errx(1, "Failed to look up service to connect to");
@@ -908,6 +916,7 @@ int main(int argc, char *argv[])
 		.validate = opt.validate,
 		.iou = opt.iou_dst,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
+		.zc_rx_batch = opt.zc_rx_batch,
 	};
 	struct kpm_mode src_mode = {
 		.rx_mode = rx_mode == KPM_RX_MODE_DEVMEM && !rr ?
@@ -924,6 +933,7 @@ int main(int argc, char *argv[])
 		.validate = opt.validate,
 		.iou = opt.iou_src,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
+		.zc_rx_batch = opt.zc_rx_batch,
 	};
 	/*
 	 * Set up the final RSS contexts before creating connections so the
