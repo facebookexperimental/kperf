@@ -439,6 +439,7 @@ ep_handle_zerocopy_recv(struct worker_state *self, struct worker_connection *con
 		errno = EAGAIN;
 		return -1;
 	}
+	conn->zc.mapped += zc.length;
 
 	src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
 	if (self->opts.validate && memcmp(addr, src, zc.length))

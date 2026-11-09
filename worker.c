@@ -289,6 +289,7 @@ static void worker_report_test(struct worker_state *self)
 
 		data->rx_bytes = conn->tot_recv;
 		data->tx_bytes = conn->tot_sent;
+		data->rx_mapped = conn->zc.mapped;
 
 		if (conn->spec->type == KPM_TEST_TYPE_RR) {
 			data->reqs = conn->rr.reqs;
