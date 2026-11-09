@@ -353,9 +353,12 @@ ep_handle_zerocopy_recv(struct worker_state *self, struct worker_connection *con
 	res = getsockopt(conn->fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE,
 			 &zc, &len);
 	if (res < 0)
-		return res;
-	if (zc.err)
-		return zc.err;
+		/* EIO once the peer closed, recv() returns 0 */
+		return errno == EIO ? 0 : -1;
+	if (zc.err || zc.copybuf_len < 0) {
+		errno = zc.err ? -zc.err : -zc.copybuf_len;
+		return -1;
+	}
 
 	if (zc.length) {
 		if (self->opts.validate && memcmp(conn->addr, src, zc.length))
@@ -379,7 +382,11 @@ ep_handle_zerocopy_recv(struct worker_state *self, struct worker_connection *con
 
 	/* Sometimes getsockopt returns 0 for both length and copybuf_len, try
 	 * again */
-	return n == 0 ? -EAGAIN : n;
+	if (!n) {
+		errno = EAGAIN;
+		return -1;
+	}
+	return n;
 }
 
 static ssize_t
@@ -433,8 +440,6 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 		}
 		if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				break;
-			if (n == -EAGAIN)
 				break;
 			warn("Recv failed");
 			worker_kill_conn(self, conn);
