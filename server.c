@@ -47,7 +47,8 @@ static const struct opt_table opts[] = {
 			"Don't start a daemon"),
 	OPT_WITH_ARG("--pid-file <arg>", opt_set_charp, opt_show_charp,
 		     &opt.pid_file, "Set daemon identity / pid file"),
-	OPT_WITHOUT_ARG("--kill", opt_set_bool, &opt.kill, "Stop the daemon"),
+	OPT_WITHOUT_ARG("--kill", opt_set_bool, &opt.kill,
+			"Stop the daemon, and wait for its sessions to finish"),
  	OPT_WITHOUT_ARG("--verbose|-v", opt_inc_intval, &verbose,
 			"Verbose mode (can be specified more than once)"),
  	OPT_WITHOUT_ARG("--usage|--help|-h", opt_usage_and_exit,
@@ -101,12 +102,15 @@ static void server_reap_sessions(void)
 	}
 }
 
+#define KILL_TIMEOUT_SEC	60
+
 static void kill_old_daemon(void)
 {
+	bool stuck = false;
 	char buf[10];
 	ssize_t n;
 	pid_t pid;
-	int fd;
+	int fd, i;
 
 	fd = open(opt.pid_file, O_RDONLY);
 	if (fd < 0) {
@@ -125,12 +129,25 @@ static void kill_old_daemon(void)
 
 	pid = atoi(buf);
 
-	if (kill(pid, SIGKILL))
+	if (kill(pid, SIGTERM)) {
 		if (errno != ESRCH)
-			err(2, "Can't kill the old daemon");
+			err(2, "Can't stop the old daemon");
+	} else {
+		for (i = 0; i < KILL_TIMEOUT_SEC * 10; i++) {
+			if (kill(pid, 0) && errno == ESRCH)
+				break;
+			usleep(100 * 1000);
+		}
+		stuck = i == KILL_TIMEOUT_SEC * 10;
+		if (stuck)
+			kill(-pid, SIGKILL);
+	}
 
 	if (unlink(opt.pid_file))
 		err(2, "Failed to remove pid file");
+	if (stuck)
+		errx(2, "The old daemon did not stop in %d seconds",
+		     KILL_TIMEOUT_SEC);
 }
 
 static void server_daemonize(void)
