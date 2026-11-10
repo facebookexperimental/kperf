@@ -44,10 +44,25 @@ struct worker_connection {
 	__u64 tot_recv;
 	unsigned char *rxbuf;
 
-	/* zero copy receive */
-	size_t rsize;
-	void *raddr;
-	void *addr;
+	/* TCP_ZEROCOPY_RECEIVE */
+	struct {
+		/* mmap() of the socket */
+		void *map;
+		size_t map_len;
+		/* Reads map one after the other from the start of the area,
+		 * nothing past off is mapped.  A read maps up to read_len,
+		 * --read-size capped at the area, a batch.
+		 */
+		size_t read_len;
+		unsigned char *area;
+		size_t area_len;
+		size_t off;
+		/* What the kernel copies rather than maps */
+		unsigned char *copybuf;
+		size_t copybuf_len;
+		/* What the kernel mapped rather than copied, for the results */
+		__u64 mapped;
+	} zc;
 
 	struct connection_devmem devmem;
 	struct kpm_test_spec *spec;

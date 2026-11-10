@@ -69,6 +69,8 @@ static struct {
 	bool iou_src;
 	bool iou_dst;
 	bool zerocopy_rx;
+	unsigned int zc_rx_batch;
+	unsigned int zc_rx_copybuf;
 	unsigned int iou_rx_size_mb;
 } opt = {
 	.tls_ver = TLS_1_3_VERSION,
@@ -105,6 +107,8 @@ static struct {
 	.iou_src = false,
 	.iou_dst = false,
 	.zerocopy_rx = false,
+	.zc_rx_batch = 2 << 20,
+	.zc_rx_copybuf = 16 * 1024,
 	.iou_rx_size_mb = 64,
 };
 
@@ -302,7 +306,13 @@ static const struct opt_table opts[] = {
 	OPT_WITHOUT_ARG("--iou-dst", opt_set_bool, &opt.iou_dst,
 			"Use io_uring on destination server"),
 	OPT_EARLY_WITHOUT_ARG("--zerocopy-rx", opt_set_bool, &opt.zerocopy_rx,
-			      "Use zero copy on receive"),
+			      "Use zero copy on receive: io_uring with --iou-dst/--iou-src, else TCP_ZEROCOPY_RECEIVE"),
+	OPT_WITH_ARG("--zerocopy-rx-batch <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.zc_rx_batch,
+		     "TCP_ZEROCOPY_RECEIVE: keep up to <arg> bytes mapped, and unmap them at once, with one TLB flush; a read maps at most that much (rounded up to pages)"),
+	OPT_WITH_ARG("--zerocopy-rx-copybuf <arg>", opt_set_uintval, opt_show_uintval,
+		     &opt.zc_rx_copybuf,
+		     "TCP_ZEROCOPY_RECEIVE: copy reads which find at most <arg> bytes queued, and up to <arg> past what each read maps (rounded up to pages)"),
 	OPT_WITH_ARG("--iou-rx-size-mb <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.iou_rx_size_mb, "Size of RX memory reserved by io_uring"),
 	OPT_ENDTABLE
@@ -512,6 +522,16 @@ static unsigned long long lat_us(unsigned long long lat)
 	return lat * KPM_LAT_UNIT_NS / 1000;
 }
 
+/* The side receives with TCP_ZEROCOPY_RECEIVE, rather than with io_uring.
+ * The source receives only responses.
+ */
+static bool tcp_zc_rx(bool local)
+{
+	if (!opt.zerocopy_rx || (local && opt.req_size == ~0U))
+		return false;
+	return !(local ? opt.iou_src : opt.iou_dst);
+}
+
 static void
 dump_result(struct kpm_test_results *result,
 	    struct kpm_connect_reply *conns, bool local)
@@ -538,6 +558,12 @@ dump_result(struct kpm_test_results *result,
 		      1000,
 		      result->res[r].rx_bytes,
 		      result->time_usec);
+	for (r = 0; tcp_zc_rx(local) && r < opt.n_conns; r++)
+		if (result->res[r].rx_bytes)
+			warnx("  Rx%7.2lf%% mapped (%llu bytes)",
+			      result->res[r].rx_mapped * 100.0 /
+			      result->res[r].rx_bytes,
+			      result->res[r].rx_mapped);
 	warnx("  TCP retrans reord rtt rttvar d_ce snd_wnd cwnd");
 	for (r = 0; r < opt.n_conns; r++)
 		warnx("      %7u %5u %3u %6u %4u %7u %4u",
@@ -621,6 +647,7 @@ dump_result_machine(struct kpm_test_results *result,
 {
 	struct kpm_test_result res = {};
 	unsigned int inflight_max = 0;
+	bool zc_rx = tcp_zc_rx(true) || tcp_zc_rx(false);
 	bool rr = opt.req_size != ~0U;
 	struct kpm_cpu_load *cpu;
 	unsigned int r;
@@ -634,6 +661,7 @@ dump_result_machine(struct kpm_test_results *result,
 #define S(f) res.f += result->res[r].f;
 		S(rx_bytes);
 		S(tx_bytes);
+		S(rx_mapped);
 		S(reqs);
 		S(rr_sent);
 		S(retrans);
@@ -675,6 +703,8 @@ dump_result_machine(struct kpm_test_results *result,
 				printf("latency,(us),,,,,,");
 			if (rr)
 				printf(opt.rps ? "rr,,,," : "rr,");
+			if (zc_rx)
+				printf("zerocopy,");
 			if (opt.n_conns < 2) {
 				printf("net,,,,");
 				if (opt.pin_off)
@@ -689,6 +719,8 @@ dump_result_machine(struct kpm_test_results *result,
 			if (rr)
 				printf(opt.rps ? "rps,target,sent,max_inflight," :
 				       "rps,");
+			if (zc_rx)
+				printf("mapped,");
 			if (opt.n_conns < 2) {
 				printf("usr,sys,idle,sirq,");
 				if (opt.pin_off)
@@ -721,6 +753,12 @@ dump_result_machine(struct kpm_test_results *result,
 		else
 			printf(",,");
 	}
+
+	/* The share of the data received which got mapped */
+	if (zc_rx && tcp_zc_rx(local) && res.rx_bytes)
+		printf("%.4f,", (double)res.rx_mapped / res.rx_bytes);
+	else if (zc_rx)
+		printf(",");
 
 	/* Dunno how to report CPU use, yet */
 	if (opt.n_conns < 2) {
@@ -844,6 +882,11 @@ int main(int argc, char *argv[])
 	if (opt.rps && opt.req_size == ~0U)
 		errx(1, "--rps needs --req-size");
 
+	if (!opt.zc_rx_batch)
+		errx(1, "--zerocopy-rx-batch must be at least 1");
+	if (opt.zc_rx_copybuf > KPM_MAX_OP_CHUNK)
+		errx(1, "Max --zerocopy-rx-copybuf is %d", KPM_MAX_OP_CHUNK);
+
 	addr = net_client_lookup(opt.src, opt.src_svc, AF_UNSPEC, SOCK_STREAM);
 	if (!addr)
 		errx(1, "Failed to look up service to connect to");
@@ -908,6 +951,8 @@ int main(int argc, char *argv[])
 		.validate = opt.validate,
 		.iou = opt.iou_dst,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
+		.zc_rx_batch = opt.zc_rx_batch,
+		.zc_rx_copybuf = opt.zc_rx_copybuf,
 	};
 	struct kpm_mode src_mode = {
 		.rx_mode = rx_mode == KPM_RX_MODE_DEVMEM && !rr ?
@@ -924,6 +969,8 @@ int main(int argc, char *argv[])
 		.validate = opt.validate,
 		.iou = opt.iou_src,
 		.iou_rx_size_mb = opt.iou_rx_size_mb,
+		.zc_rx_batch = opt.zc_rx_batch,
+		.zc_rx_copybuf = opt.zc_rx_copybuf,
 	};
 	/*
 	 * Set up the final RSS contexts before creating connections so the

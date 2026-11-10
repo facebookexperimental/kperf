@@ -175,6 +175,10 @@ struct kpm_mode {
 	__u8 validate;
 	__u8 iou;
 	__u32 iou_rx_size_mb;
+
+	/* TCP_ZEROCOPY_RECEIVE */
+	__u32 zc_rx_batch;
+	__u32 zc_rx_copybuf;
 };
 
 struct kpm_setup_rx_steering {
@@ -275,6 +279,8 @@ struct kpm_test_results {
 		enum kpm_test_type type;
 		__u64 rx_bytes;
 		__u64 tx_bytes;
+		/* Of rx_bytes, mapped by TCP_ZEROCOPY_RECEIVE */
+		__u64 rx_mapped;
 
 		__u32 reqs;
 		/* Open loop only, on the side sending requests */

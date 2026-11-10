@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <sys/epoll.h>
 #include <linux/errqueue.h>
 #include <sys/mman.h>
@@ -21,6 +22,12 @@ extern unsigned char patbuf[KPM_MAX_OP_CHUNK + PATTERN_PERIOD + 1];
 
 #define ALIGN_UP(v, align) (((v) + (align) - 1) & ~((align) - 1))
 #define ALIGN_PTR_UP(p, ptr_align_to)	((typeof(p))ALIGN_UP((unsigned long)(p), ptr_align_to))
+
+#ifndef TCP_RECEIVE_ZEROCOPY_FLAG_TLB_CLEAN_HINT
+#define TCP_RECEIVE_ZEROCOPY_FLAG_TLB_CLEAN_HINT 0x1
+#endif
+
+static long page_size;
 
 /* Each thread should reserve a big enough vma to avoid
  * spinlock collisions in ptl locks.
@@ -45,7 +52,77 @@ static unsigned long default_huge_page_size(void)
 	}
 	free(line);
 	fclose(f);
-	return hps;
+	return hps ?: 2 * 1024 * 1024;
+}
+
+/* == TCP zero copy receive ==
+ * The kernel maps the pages it received into a read-only mmap() of a TCP
+ * socket.  Each connection maps its reads one after the other into an area
+ * of its own, and unmaps them all at once when the area is full: unmapping
+ * flushes the TLBs of all the CPUs running the session's workers.  Nothing
+ * past the last read is mapped, so reads spare the kernel unmapping the
+ * range they map into (TCP_RECEIVE_ZEROCOPY_FLAG_TLB_CLEAN_HINT), which
+ * flushes all the TLBs as well while another worker unmaps.
+ *
+ * A batch is --zerocopy-rx-batch bytes, and a read maps at most that
+ * much, whatever --read-size is.
+ */
+
+static void ep_zc_rx_unmap(struct worker_connection *conn)
+{
+	if (!conn->zc.off)
+		return;
+
+	if (madvise(conn->zc.area, conn->zc.off, MADV_DONTNEED))
+		warn("Failed to unmap received pages");
+	conn->zc.off = 0;
+}
+
+static int
+ep_zc_rx_add(struct worker_state *self, struct worker_connection *conn)
+{
+	size_t huge = default_huge_page_size();
+
+	/* Room for a batch, from a huge page boundary to the end of a huge
+	 * page: that is the span of a page table, workers mapping into areas
+	 * of their own don't share page table locks.
+	 */
+	conn->zc.area_len = ALIGN_UP((size_t)self->opts.zc_rx_batch ?: 1,
+				     page_size);
+	conn->zc.read_len = min_t(size_t, ALIGN_UP((size_t)conn->read_size,
+						   page_size), conn->zc.area_len);
+	conn->zc.map_len = ALIGN_UP(conn->zc.area_len, huge) + huge;
+	conn->zc.map = mmap(NULL, conn->zc.map_len, PROT_READ, MAP_SHARED,
+			    conn->fd, 0);
+	if (conn->zc.map == MAP_FAILED) {
+		warn("Failed to mmap TCP_ZEROCOPY_RECEIVE");
+		conn->zc.map = NULL;
+		return -1;
+	}
+	conn->zc.area = ALIGN_PTR_UP(conn->zc.map, huge);
+
+	/* Reads which find at most this much queued are copied, as is what
+	 * doesn't fill a page, and up to this much more of the skb a read
+	 * stops in, mappable or not.  Whole pages: a copy which ends inside a
+	 * page would leave the next read starting there, and nothing is mapped
+	 * from mid-page.
+	 */
+	conn->zc.copybuf_len = ALIGN_UP((size_t)self->opts.zc_rx_copybuf ?: 1,
+					page_size);
+	conn->zc.copybuf = malloc(conn->zc.copybuf_len);
+	if (!conn->zc.copybuf) {
+		warnx("No memory");
+		return -1;
+	}
+
+	return 0;
+}
+
+static void ep_zc_rx_close(struct worker_connection *conn)
+{
+	if (conn->zc.map)
+		munmap(conn->zc.map, conn->zc.map_len);
+	free(conn->zc.copybuf);
 }
 
 static struct worker_connection *
@@ -71,7 +148,7 @@ ep_conn_close(struct worker_state *self, struct worker_connection *conn)
 	if (self->opts.rx_mode == KPM_RX_MODE_DEVMEM)
 		(void)devmem_release_tokens(conn->fd, &conn->devmem);
 	else if (self->opts.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY)
-		munmap(conn->raddr, conn->rsize);
+		ep_zc_rx_close(conn);
 }
 
 static void
@@ -87,23 +164,10 @@ ep_conn_add(struct worker_state *self, struct worker_connection *conn)
 		return;
 	}
 
-	if (self->opts.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY) {
-		size_t map_align;
-
-		map_align = default_huge_page_size();
-		conn->raddr = mmap(NULL,
-			conn->read_size + map_align,
-			PROT_READ,
-			MAP_SHARED,
-			conn->fd,
-			0);
-		if (conn->raddr == MAP_FAILED) {
-			warnx("Failed to mmap TCP_ZEROCOPY_RECEIVE");
-			self->quit = 1;
-			return;
-		}
-		conn->addr = ALIGN_PTR_UP(conn->raddr, map_align);
-		conn->rsize = conn->read_size + map_align;
+	if (self->opts.rx_mode == KPM_RX_MODE_SOCKET_ZEROCOPY &&
+	    ep_zc_rx_add(self, conn)) {
+		self->quit = 1;
+		return;
 	}
 
 	ev.events = EPOLLIN | EPOLLOUT;
@@ -335,51 +399,64 @@ ep_start_send(struct worker_state *self, struct worker_connection *conn)
 	return ep_handle_send(self, conn, 0);
 }
 
+/* Maps up to @chunk, at most a read, and copies what can't be mapped */
 static ssize_t
 ep_handle_zerocopy_recv(struct worker_state *self, struct worker_connection *conn,
 			size_t chunk, int rep)
 {
-	void *src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
-	struct tcp_zerocopy_receive zc;
+	struct tcp_zerocopy_receive zc = {};
 	socklen_t len = sizeof(zc);
-	ssize_t n = 0;
-	int res;
+	unsigned char *addr;
+	void *src;
 
-	memset(&zc, 0, len);
-	zc.address = (__u64)((unsigned long)conn->addr);
+	/* Less than a page maps nothing, the kernel copies it instead, and
+	 * fails with EFAULT when that spans skbs.  Reading ahead is fine,
+	 * closed loop never has more queued than it expects.
+	 */
+	chunk = min_t(size_t, chunk, conn->zc.read_len);
+	chunk = max_t(size_t, chunk, page_size);
+	if (conn->zc.off + chunk > conn->zc.area_len)
+		ep_zc_rx_unmap(conn);
+	addr = conn->zc.area + conn->zc.off;
+
+	zc.address = (__u64)(unsigned long)addr;
 	zc.length = chunk;
-	zc.copybuf_address = (__u64)((unsigned long)conn->rxbuf);
-	zc.copybuf_len = chunk;
-	res = getsockopt(conn->fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE,
-			 &zc, &len);
-	if (res < 0)
-		return res;
-	if (zc.err)
-		return zc.err;
+	zc.copybuf_address = (__u64)(unsigned long)conn->zc.copybuf;
+	zc.copybuf_len = conn->zc.copybuf_len;
+	zc.flags = TCP_RECEIVE_ZEROCOPY_FLAG_TLB_CLEAN_HINT;
+	if (getsockopt(conn->fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE,
+		       &zc, &len))
+		/* EIO once the peer closed, recv() returns 0 */
+		return errno == EIO ? 0 : -1;
+	/* Mapped even if the copy failed */
+	conn->zc.off += zc.length;
 
-	if (zc.length) {
-		if (self->opts.validate && memcmp(conn->addr, src, zc.length))
-			warnx("Data corruption %d %d %u %lld %lld %d",
-			*(char *)conn->addr, *(char *)src, zc.length,
-			conn->tot_recv % PATTERN_PERIOD,
-			conn->tot_recv, rep);
-		madvise(conn->addr, zc.length, MADV_DONTNEED);
-		src = &patbuf[(conn->tot_recv + zc.length) % PATTERN_PERIOD];
-		n += zc.length;
+	if (zc.err || zc.copybuf_len < 0) {
+		errno = zc.err ? -zc.err : -zc.copybuf_len;
+		return -1;
 	}
-
-	if (zc.copybuf_len) {
-		if (self->opts.validate && memcmp(conn->rxbuf, src, zc.copybuf_len))
-			warnx("Data corruption %d %d %d %lld %lld %d",
-			*conn->rxbuf, *(char *)src, zc.copybuf_len,
-			(conn->tot_recv + n) % PATTERN_PERIOD,
-			(conn->tot_recv + n), rep);
-		n += zc.copybuf_len;
+	if (!zc.length && !zc.copybuf_len) {
+		errno = EAGAIN;
+		return -1;
 	}
+	conn->zc.mapped += zc.length;
 
-	/* Sometimes getsockopt returns 0 for both length and copybuf_len, try
-	 * again */
-	return n == 0 ? -EAGAIN : n;
+	src = &patbuf[conn->tot_recv % PATTERN_PERIOD];
+	if (self->opts.validate && memcmp(addr, src, zc.length))
+		warnx("Data corruption %d %d %u %lld %lld %d",
+		      *addr, *(char *)src, zc.length,
+		      conn->tot_recv % PATTERN_PERIOD,
+		      conn->tot_recv, rep);
+
+	src = &patbuf[(conn->tot_recv + zc.length) % PATTERN_PERIOD];
+	if (self->opts.validate &&
+	    memcmp(conn->zc.copybuf, src, zc.copybuf_len))
+		warnx("Data corruption %d %d %d %lld %lld %d",
+		      *conn->zc.copybuf, *(char *)src, zc.copybuf_len,
+		      (conn->tot_recv + zc.length) % PATTERN_PERIOD,
+		      conn->tot_recv + zc.length, rep);
+
+	return zc.length + zc.copybuf_len;
 }
 
 static ssize_t
@@ -433,8 +510,6 @@ ep_handle_recv(struct worker_state *self, struct worker_connection *conn)
 		}
 		if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				break;
-			if (n == -EAGAIN)
 				break;
 			warn("Recv failed");
 			worker_kill_conn(self, conn);
@@ -560,4 +635,5 @@ static const struct io_ops epoll_io_ops = {
 void worker_epoll_init(struct worker_state *self)
 {
 	self->ops = &epoll_io_ops;
+	page_size = sysconf(_SC_PAGESIZE);
 }

@@ -121,6 +121,9 @@ struct worker_opts {
 	bool use_iou;
 	struct worker_state_devmem devmem;
 	struct worker_state_iou iou;
+	/* TCP_ZEROCOPY_RECEIVE, see struct kpm_mode */
+	unsigned int zc_rx_batch;
+	unsigned int zc_rx_copybuf;
 	int fd;
 };
 
