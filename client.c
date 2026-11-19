@@ -821,8 +821,10 @@ int main(int argc, char *argv[])
 	socklen_t len, src_peer_len;
 	struct addrinfo *addr;
 	struct kpm_test *test;
+	bool failed = false;
 	unsigned int i;
 	int src, dst;
+	int ret = 1;
 	size_t sz;
 	bool rr;
 
@@ -1113,19 +1115,23 @@ int main(int argc, char *argv[])
 	}
 	sz = sizeof(*result) + opt.n_conns * sizeof(result->res[0]);
 	if (result->hdr.type != KPM_MSG_TYPE_TEST_RESULT ||
-	    result->hdr.len < sz)
+	    result->hdr.len < sz) {
 		warnx("Invalid result %d %d",
 		      result->hdr.type, result->hdr.len);
-	else if (opt.output_csv)
+		failed = true;
+	} else if (opt.output_csv) {
 		dump_result_machine(result, conns, src_wrk_cpu, true);
-	else
+	} else {
 		dump_result(result, conns, src_wrk_cpu, true);
+	}
 	free(result);
 
 	/* Stop the test on both ends */
 	if (kpm_req_end_test(src, src_tst_id) ||
-	    kpm_req_end_test(dst, dst_tst_id))
+	    kpm_req_end_test(dst, dst_tst_id)) {
 		warnx("Failed to stop test");
+		failed = true;
+	}
 
 	/* Destination worker is done */
 	result = kpm_receive(dst);
@@ -1134,15 +1140,18 @@ int main(int argc, char *argv[])
 		goto out_id;
 	}
 	if (result->hdr.type != KPM_MSG_TYPE_TEST_RESULT ||
-	    result->hdr.len < sizeof(*result) + sizeof(result->res[0]))
+	    result->hdr.len < sizeof(*result) + sizeof(result->res[0])) {
 		warnx("Invalid result %d %d",
 		      result->hdr.type, result->hdr.len);
-	else if (opt.output_csv)
+		failed = true;
+	} else if (opt.output_csv) {
 		dump_result_machine(result, conns, dst_wrk_cpu, false);
-	else
+	} else {
 		dump_result(result, conns, dst_wrk_cpu, false);
+	}
 	free(result);
 
+	ret = failed;
 out_id:
 	free(conns);
 out:
@@ -1154,5 +1163,5 @@ out:
 	free(src_wrk_cpu);
 	free(dst_wrk_cpu);
 
-	return 0;
+	return ret;
 }
