@@ -229,7 +229,7 @@ static const struct opt_table opts[] = {
 	OPT_WITH_ARG("--write-size <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.write_size, "Buffer size for read/recv syscall"),
 	OPT_WITH_ARG("--pin-off <arg>", opt_set_uintval, opt_show_uintval,
-		     &opt.pin_off, "CPU pin offset"),
+		     &opt.pin_off, "CPU pin offset, wraps around past the last CPU"),
 	OPT_WITH_ARG("--cpu-min <arg>", opt_set_uintval, opt_show_uintval,
 		     &opt.cpu_min, "min CPU number for connection"),
 	OPT_WITH_ARG("--cpu-max <arg>", opt_set_uintval, opt_show_uintval,
@@ -534,7 +534,7 @@ static bool tcp_zc_rx(bool local)
 
 static void
 dump_result(struct kpm_test_results *result,
-	    struct kpm_connect_reply *conns, bool local)
+	    struct kpm_connect_reply *conns, const __u32 *wrk_cpu, bool local)
 {
 	unsigned int end = 0, i, r;
 	int start = -1;
@@ -578,7 +578,7 @@ dump_result(struct kpm_test_results *result,
 		flow_cpu = local ? conns[r].local.cpu : conns[r].remote.cpu;
 		show_cpu_stat(opt.pin_off ? "net " : "", result, flow_cpu);
 		if (opt.pin_off)
-			show_cpu_stat("app ", result, flow_cpu + opt.pin_off);
+			show_cpu_stat("app ", result, wrk_cpu[r]);
 	}
 
 	/* The rest is RR-only */
@@ -643,7 +643,8 @@ dump_result(struct kpm_test_results *result,
 
 static void
 dump_result_machine(struct kpm_test_results *result,
-		    struct kpm_connect_reply *conns, bool local)
+		    struct kpm_connect_reply *conns, const __u32 *wrk_cpu,
+		    bool local)
 {
 	bool zc_rx = tcp_zc_rx(true) || tcp_zc_rx(false);
 	struct kpm_test_result res = {};
@@ -769,7 +770,7 @@ dump_result_machine(struct kpm_test_results *result,
 		       cpu->idle / 10000.0, cpu->sirq / 10000.0);
 
 		if (opt.pin_off) {
-			cpu = &result->cpu_load[flow_cpu + opt.pin_off];
+			cpu = &result->cpu_load[wrk_cpu[r]];
 			printf("%.4f,%.4f,%.4f,%.4f,",
 			       cpu->user / 10000.0, cpu->system / 10000.0,
 			       cpu->idle / 10000.0, cpu->sirq / 10000.0);
@@ -1046,14 +1047,16 @@ int main(int argc, char *argv[])
 		else if (opt.cpu_src_wrk != -1)
 			src_wrk_cpu[i] = opt.cpu_src_wrk;
 		else
-			src_wrk_cpu[i] = id->local.cpu + opt.pin_off;
+			src_wrk_cpu[i] = (id->local.cpu + opt.pin_off) %
+					 src_ncpus;
 
 		if (opt.xpin)
 			dst_wrk_cpu[i] = conns[!i].remote.cpu;
 		if (opt.cpu_dst_wrk != -1)
 			dst_wrk_cpu[i] = opt.cpu_dst_wrk;
 		else
-			dst_wrk_cpu[i] = id->remote.cpu + opt.pin_off;
+			dst_wrk_cpu[i] = (id->remote.cpu + opt.pin_off) %
+					 dst_ncpus;
 
 		if (spawn_worker(src, src_wrk_cpu[i], &src_wrk_id[i]) ||
 		    spawn_worker(dst, dst_wrk_cpu[i], &dst_wrk_id[i]))
@@ -1114,9 +1117,9 @@ int main(int argc, char *argv[])
 		warnx("Invalid result %d %d",
 		      result->hdr.type, result->hdr.len);
 	else if (opt.output_csv)
-		dump_result_machine(result, conns, true);
+		dump_result_machine(result, conns, src_wrk_cpu, true);
 	else
-		dump_result(result, conns, true);
+		dump_result(result, conns, src_wrk_cpu, true);
 	free(result);
 
 	/* Stop the test on both ends */
@@ -1135,9 +1138,9 @@ int main(int argc, char *argv[])
 		warnx("Invalid result %d %d",
 		      result->hdr.type, result->hdr.len);
 	else if (opt.output_csv)
-		dump_result_machine(result, conns, false);
+		dump_result_machine(result, conns, dst_wrk_cpu, false);
 	else
-		dump_result(result, conns, false);
+		dump_result(result, conns, dst_wrk_cpu, false);
 	free(result);
 
 out_id:
